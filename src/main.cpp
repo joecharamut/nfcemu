@@ -1,6 +1,4 @@
-#include <avr/io.h>
-#include <util/delay.h>
-// #include "nfcemulator.h"
+#include <avr/common.h>
 #include "logging.h"
 #include "emulator.h"
 
