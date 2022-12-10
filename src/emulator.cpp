@@ -377,13 +377,12 @@ void Emulator::tick() {
 
   do {
     switch (state) {
-      case ST_IDLE: handleIdle(); break;
-      case ST_READY_CL1: handleReady1(); break;
-      
-      case ST_READY_CL2: break;
-      case ST_READY_CL3: break;
-      case ST_ACTIVE: break;
-      case ST_SLEEP: break;
+      case ST_IDLE:       handleIdle();   break;
+      case ST_READY_CL1:  handleReady1(); break;
+      case ST_READY_CL2:  handleReady2(); break;
+      case ST_READY_CL3:  handleReady2(); break;
+      case ST_ACTIVE:     handleActive(); break;
+      case ST_SLEEP:      handleSleep();  break;
 
       default: break;
     }
@@ -467,3 +466,107 @@ void Emulator::handleReady1() {
   }
   clearAcInterrupt();
 }
+
+void Emulator::handleReady2() {
+  /**
+   * READY_CL2 state:
+   *  if recieve SDD_REQ CL2, send NFCID1 CL2 and stay in READY_CL2 state
+   *  else if recieve SEL_REQ CL2 with matching NFCID1 CL2:
+   *    if double size NFCID1: enter ACTIVE state
+   *    else (triple size NFCID1): enter READY_CL3 state
+   *  else: enter IDLE state
+   **/
+
+  if (START_OF_FRAME) {
+    disableAin1Pullup();
+    uint8_t read = rxMiller();
+    // SDD_REQ/SEL_REQ frames will be 2+ bytes long
+    if (read >= 2) {
+      nfc_sdd_frame_t *sdd_frame = (nfc_sdd_frame_t *) buffer;
+      // frame format:
+      //   byte 0 bits 7..4: SDD_REQ [0b1001]
+      //   byte 0 bits 3..0: CLx [0b0011 = CL1, 0b0101 = CL2, 0b0111 = CL3]
+      //   byte 1 bits 7..4: byte count [0x2 = 0 extra bytes, 0x7 = 5 extra bytes]
+      //   byte 1 bits 3..0: bit count [always 0 for NFCA?]
+      if (sdd_frame->cmd == SDD_REQ && sdd_frame->col == NFC_CL2) {
+        if (sdd_frame->byte_count == 0x2) {
+          // 0 extra bytes: Valid SDD_REQ CL2 command
+          txManchester(nfcid[1], sizeof(nfcid[1]));
+        } else if (sdd_frame->byte_count == 0x7) {
+          // 5 extra bytes: Potentially valid SEL_REQ CL2 command
+          if (memcmp(buffer + 2, nfcid[1], sizeof(nfcid[1])) == 0) {
+            // if matching uid: send SEL_RES resp
+            uint8_t sel_res = 0b00000000;
+            //                  -tt--c--
+            // - = unused
+            // tt = tag type (00 = type 2, 01 = type 4A, 10 = nfc-dep, 11 = type 4A + nfc-dep)
+            // c = cascade bit (1 = not complete, 0 = complete)
+            if (nfcid1Size != 1) {
+              // CL3 uid, set cascade bit and go to next READY_CLx state
+              sel_res |= (1 << 3);
+              txManchester(&sel_res, 1);
+              state = ST_READY_CL3;
+            } else {
+              // CL2 uid, tx response and switch to ACTIVE state
+              txManchester(&sel_res, 1);
+              state = ST_ACTIVE;
+            }
+          }
+        }
+      }
+    }
+    enableAin1Pullup();
+  }
+  clearAcInterrupt();
+}
+
+void Emulator::handleReady3() {
+  /**
+   * READY_CL3 state:
+   *  if recieve SDD_REQ CL3, send NFCID1 CL3 and stay in READY_CL3 state
+   *  else if recieve SEL_REQ CL3 with matching NFCID1 CL3:
+   *    if triple size NFCID1: enter ACTIVE state
+   *  else: enter IDLE state
+   **/
+
+  if (START_OF_FRAME) {
+    disableAin1Pullup();
+    uint8_t read = rxMiller();
+    // SDD_REQ/SEL_REQ frames will be 2+ bytes long
+    if (read >= 2) {
+      nfc_sdd_frame_t *sdd_frame = (nfc_sdd_frame_t *) buffer;
+      // frame format:
+      //   byte 0 bits 7..4: SDD_REQ [0b1001]
+      //   byte 0 bits 3..0: CLx [0b0011 = CL1, 0b0101 = CL2, 0b0111 = CL3]
+      //   byte 1 bits 7..4: byte count [0x2 = 0 extra bytes, 0x7 = 5 extra bytes]
+      //   byte 1 bits 3..0: bit count [always 0 for NFCA?]
+      if (sdd_frame->cmd == SDD_REQ && sdd_frame->col == NFC_CL3) {
+        if (sdd_frame->byte_count == 0x2) {
+          // 0 extra bytes: Valid SDD_REQ CL3 command
+          txManchester(nfcid[2], sizeof(nfcid[2]));
+        } else if (sdd_frame->byte_count == 0x7) {
+          // 5 extra bytes: Potentially valid SEL_REQ CL3 command
+          if (memcmp(buffer + 2, nfcid[2], sizeof(nfcid[2])) == 0) {
+            // if matching uid: send SEL_RES resp
+            uint8_t sel_res = 0b00000000;
+            //                  -tt--c--
+            // - = unused
+            // tt = tag type (00 = type 2, 01 = type 4A, 10 = nfc-dep, 11 = type 4A + nfc-dep)
+            // c = cascade bit (1 = not complete, 0 = complete)
+            if (nfcid1Size == 2) {
+              // CL3 uid, tx response and switch to ACTIVE state
+              txManchester(&sel_res, 1);
+              state = ST_ACTIVE;
+            }
+          }
+        }
+      }
+    }
+    enableAin1Pullup();
+  }
+  clearAcInterrupt();
+}
+
+void Emulator::handleActive() {}
+
+void Emulator::handleSleep() {}

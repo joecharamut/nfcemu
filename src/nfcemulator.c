@@ -17,7 +17,6 @@ limitations under the License.
 #include <avr/io.h>
 #include <util/delay.h>
 #include "nfcemulator.h"
-#include "logging.h"
 
 #ifdef __AVR_ATmega328P__
 
