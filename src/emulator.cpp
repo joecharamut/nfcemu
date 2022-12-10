@@ -368,110 +368,6 @@ static const uint8_t SENS_RES[3][2] = {
   { 0b10000100, 0b00000000 }, // SEL_RES CL3 (10 UID bytes)
 };
 
-uint8_t Emulator::communicate() {
-  disableAin1Pullup();
-
-  // after start-of-communication (0 bit), attempt to recieve data
-  // int b = rxMiller();
-  // if (b) {
-  //   logStr("read "); logInt(b); logStr(" bytes\n");
-  //   hexdump(buffer, b);
-  // }
-
-  RED_OFF();
-  BLU_OFF();
-
-  const uint8_t MAX_RETRIES = 0x20;
-  uint8_t retries = MAX_RETRIES;
-  uint8_t bytesRead;
-  do {
-    bytesRead = rxMiller();
-
-    if (bytesRead == 0) {
-      retries--;
-    } else if (bytesRead == 1) {
-      nfc_short_frame_t *short_frame = (nfc_short_frame_t *) buffer;
-      if (short_frame->cmd == SENS_REQ || short_frame->cmd == ALL_REQ) {
-          txManchester(ATQA, sizeof(ATQA));
-          retries = MAX_RETRIES;
-          RED_ON();
-      } else {
-        // logStr("Unknown short frame! cmd="); logHex(short_frame->cmd); logStr("\n");
-      }
-    } else if (bytesRead == 2) {
-      nfc_sdd_frame_t *sdd_frame = (nfc_sdd_frame_t *) buffer;
-      if (sdd_frame->cmd == SDD_REQ) {
-        if (sdd_frame->col == NFC_CL1) {
-          txManchester(nfcid[0], sizeof(nfcid[0]));
-          retries = MAX_RETRIES;
-          BLU_ON();
-        } else if (sdd_frame->col == NFC_CL2) {
-          txManchester(nfcid[1], sizeof(nfcid[1]));
-        } else if (sdd_frame->col == NFC_CL3) {
-          // todo: impl. collision level 3
-          // txManchester(nfcid[2], sizeof(nfcid[2]));
-        } else {
-          // logStr("Unknown col level! col="); logHex(sdd_frame->col); logStr("\n");
-        }
-      } else {
-        // logStr("Unknown sdd frame! cmd="); logHex(sdd_frame->cmd); logStr("\n");
-      }
-    } else {
-      uint8_t dataBytes = bytesRead - 2;
-      uint8_t crc[2] = { buffer[bytesRead-2], buffer[bytesRead-1] };
-
-      if (dataBytes == 7) {
-        nfc_sel_cmd_t *sel = (nfc_sel_cmd_t *) buffer;
-        if (sel->cmd == SDD_REQ) {
-          uint8_t resp = 0b00000000;
-          //               -tt--c--
-          // - = unused
-          // tt = tag type (00 = type 2, 01 = type 4A, 10 = nfc-dep, 11 = type 4A + nfc-dep)
-          // c = cascade bit (1 = not complete, 0 = complete)
-          if (sel->col == NFC_CL1) {
-            if (memcmp(buffer+1, nfcid[0], 5) == 0) {
-              // set cascade bit if needed
-              if (nfcid[0][0] == 0x88) resp |= (1<<2);
-              txManchester(&resp, 1);
-              retries = MAX_RETRIES;
-            }
-          } else if (sel->col == NFC_CL2) {
-            if (memcmp(buffer+1, nfcid[1], 5) == 0) {
-              // set cascade bit if needed
-              if (nfcid[1][0] == 0x88) resp |= (1<<2);
-              txManchester(&resp, 1);
-              retries = MAX_RETRIES;
-              // logStr("SEL_REQ\n");
-            }
-          } else if (sel->col == NFC_CL3) {
-            // todo: impl. collision level 3
-            // txManchester(nfcid[2], sizeof(nfcid[2]));
-          } else {
-            // logStr("Unknown col level! col="); logHex(sel->col); logStr("\n");
-          }
-        }
-      } else if (dataBytes == 2 && (buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1])) {
-        retries = MAX_RETRIES;
-        // logStr("SLP_REQ\n");
-      } else {
-        // logStr("rx: "); logInt(dataBytes); logStr(" bytes +2 crc\n");
-        // hexdump(buffer, bytesRead);
-      }
-    }
-    /*} else if (bytesRead == 2 && (buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1])) {
-      logStr("SLP_REQ\n");
-    } else if (bytesRead) {
-      logStr("read "); logInt(bytesRead); logStr(" bytes\n");
-      hexdump(buffer, bytesRead);
-    }*/
-
-    // if (!bytesRead) --retries;
-  } while (retries);
-
-  enableAin1Pullup();
-  return 0;
-}
-
 // comparator interrupt set on rising edge == start of frame condition
 #define START_OF_FRAME (ACSR & (1<<ACI))
 
@@ -502,6 +398,7 @@ void Emulator::handleIdle() {
    **/
 
   if (START_OF_FRAME) {
+    disableAin1Pullup();
     uint8_t read = rxMiller();
     // ALL_REQ/SENS_REQ are short frames = 1 bytes
     if (read == 1) {
@@ -513,6 +410,7 @@ void Emulator::handleIdle() {
         state = ST_READY_CL1;
       }
     }
+    enableAin1Pullup();
   }
   clearAcInterrupt();
 }
@@ -528,6 +426,7 @@ void Emulator::handleReady1() {
    **/
 
   if (START_OF_FRAME) {
+    disableAin1Pullup();
     uint8_t read = rxMiller();
     // SDD_REQ/SEL_REQ frames will be 2+ bytes long
     if (read >= 2) {
@@ -564,6 +463,7 @@ void Emulator::handleReady1() {
         }
       }
     }
+    enableAin1Pullup();
   }
   clearAcInterrupt();
 }

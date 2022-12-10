@@ -49,7 +49,6 @@ private:
 
   uint8_t rxMiller();
   void txManchester(const uint8_t *buf, uint8_t count);
-  uint8_t communicate();
 
   void handleIdle();
   void handleReady1();
