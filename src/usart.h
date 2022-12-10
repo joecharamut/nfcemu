@@ -26,5 +26,8 @@ public:
     void begin(uint32_t baudrate);
     void transmit(uint8_t data);
     void print(const char *str);
-    void print(uint32_t num, uint8_t base = 10);
+    void print(uint32_t num, uint8_t base = DEC);
+    void hexdump(uint8_t *buf, uint8_t sz);
 };
+
+extern USART Serial;

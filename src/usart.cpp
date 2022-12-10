@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <avr/io.h>
 
 static const char NUM_ALPHABET[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"; 
+USART Serial;
 
 void USART::begin(uint32_t baudrate) {
     uint32_t ubrr = F_CPU / 16 / baudrate - 1;
@@ -54,4 +55,18 @@ void USART::print(uint32_t num, uint8_t base) {
         print(num / base, base);
         transmit(NUM_ALPHABET[num % base]);
     }
+}
+
+void USART::hexdump(uint8_t *buf, uint8_t sz) {
+  print(sz, DEC); print(" bytes:\n");
+  for (uint8_t i = 0; i < sz; i += 16) {
+    print(i);
+    print("\t");
+    for (uint8_t j = 0; j < 16 && (i+j)<sz; j++) {
+      print(buf[i+j], HEX);
+      print(" ");
+    }
+    print("\n");
+  }
+  print("\n");
 }

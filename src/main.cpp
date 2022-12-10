@@ -16,7 +16,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ***********************************************************************/
 
 #include <avr/common.h>
-#include "logging.h"
+#include "usart.h"
 #include "emulator.h"
 
 uint8_t tagStorage[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE1, 0x10, 0x80, 0x00, //Byte  0 to 15:
@@ -41,13 +41,10 @@ uint8_t tagUid[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
 NfcEmu::Emulator emu;
 
 int main() {
-  logInit();
-  // setupNfcEmulator(tagStorage, sizeof(tagStorage));
+  Serial.begin(9600);
   emu.setup(tagStorage, sizeof(tagStorage));
   emu.setUid(tagUid, sizeof(tagUid));
-  // Serial.println("Hello");
-  // Serial.init(9600);
-  logStr("hello world\n");
+  Serial.print("Hello world\n");
   
   while (1) {
     emu.tick();

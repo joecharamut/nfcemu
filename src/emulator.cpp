@@ -17,8 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "emulator.h"
 
-#include "logging.h"
-
 #include <util/delay.h>
 #include <string.h>
 
@@ -398,7 +396,7 @@ uint8_t Emulator::communicate() {
           retries = MAX_RETRIES;
           RED_ON();
       } else {
-        logStr("Unknown short frame! cmd="); logHex(short_frame->cmd); logStr("\n");
+        // logStr("Unknown short frame! cmd="); logHex(short_frame->cmd); logStr("\n");
       }
     } else if (bytesRead == 2) {
       nfc_sdd_frame_t *sdd_frame = (nfc_sdd_frame_t *) buffer;
@@ -413,10 +411,10 @@ uint8_t Emulator::communicate() {
           // todo: impl. collision level 3
           // txManchester(nfcid[2], sizeof(nfcid[2]));
         } else {
-          logStr("Unknown col level! col="); logHex(sdd_frame->col); logStr("\n");
+          // logStr("Unknown col level! col="); logHex(sdd_frame->col); logStr("\n");
         }
       } else {
-        logStr("Unknown sdd frame! cmd="); logHex(sdd_frame->cmd); logStr("\n");
+        // logStr("Unknown sdd frame! cmd="); logHex(sdd_frame->cmd); logStr("\n");
       }
     } else {
       uint8_t dataBytes = bytesRead - 2;
@@ -443,18 +441,18 @@ uint8_t Emulator::communicate() {
               if (nfcid[1][0] == 0x88) resp |= (1<<2);
               txManchester(&resp, 1);
               retries = MAX_RETRIES;
-              logStr("SEL_REQ\n");
+              // logStr("SEL_REQ\n");
             }
           } else if (sel->col == NFC_CL3) {
             // todo: impl. collision level 3
             // txManchester(nfcid[2], sizeof(nfcid[2]));
           } else {
-            logStr("Unknown col level! col="); logHex(sel->col); logStr("\n");
+            // logStr("Unknown col level! col="); logHex(sel->col); logStr("\n");
           }
         }
       } else if (dataBytes == 2 && (buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1])) {
         retries = MAX_RETRIES;
-        logStr("SLP_REQ\n");
+        // logStr("SLP_REQ\n");
       } else {
         // logStr("rx: "); logInt(dataBytes); logStr(" bytes +2 crc\n");
         // hexdump(buffer, bytesRead);
