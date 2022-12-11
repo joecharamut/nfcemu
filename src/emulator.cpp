@@ -565,4 +565,27 @@ void Emulator::handleReady3() {
 
 void Emulator::handleActive() {}
 
-void Emulator::handleSleep() {}
+void Emulator::handleSleep() {
+  /**
+   * SLEEP state:
+   *  if recieve ALL_REQ: switch to READY state
+   *  else: stay in SLEEP state
+   **/
+
+  if (START_OF_FRAME) {
+    disableAin1Pullup();
+    uint8_t read = rxMiller();
+    // ALL_REQ is a short frame = 1 bytes
+    if (read == 1) {
+      nfc_short_frame_t *short_frame = (nfc_short_frame_t *) buffer;
+      if (short_frame->cmd == ALL_REQ) {
+        // after recieving ALL_REQ, 
+        //  nfc device must transmit SENS_RES and enter READY state
+        txManchester(SENS_RES[nfcid1Size], sizeof(SENS_RES[nfcid1Size]));
+        state = ST_READY_CL1;
+      }
+    }
+    enableAin1Pullup();
+  }
+  clearAcInterrupt();
+}
