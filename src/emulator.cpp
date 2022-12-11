@@ -138,10 +138,6 @@ static void genBcc(uint8_t *buf) {
   buf[4] = buf[0] ^ buf[1] ^ buf[2] ^ buf[3];
 }
 
-static uint8_t bcc(const uint8_t *buf) {
-  return buf[0] ^ buf[1] ^ buf[2] ^ buf[3];
-}
-
 void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
   if (uidSize <= 4) {
     // 4 byte uid = Cascade Lv 1
