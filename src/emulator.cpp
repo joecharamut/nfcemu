@@ -16,6 +16,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ***********************************************************************/
 
 #include "emulator.h"
+#include "usart.h"
 
 #include <util/delay.h>
 #include <string.h>
@@ -371,6 +372,10 @@ void Emulator::tick() {
   // big TODO: need to wait after rx-ing data
   // spec says minimum response time for tag->device is 87us
 
+  GRN_OFF();
+  RED_OFF();
+  BLU_OFF();
+
   do {
     switch (state) {
       case ST_IDLE:       handleIdle();   break;
@@ -403,11 +408,13 @@ void Emulator::handleIdle() {
         //  nfc device must transmit SENS_RES and enter READY state
         txManchester(SENS_RES[nfcid1Size], sizeof(SENS_RES[nfcid1Size]));
         state = ST_READY_CL1;
+        GRN_ON();
+        return;
       }
     }
-    enableAin1Pullup();
+    // enableAin1Pullup();
+    clearAcInterrupt();
   }
-  clearAcInterrupt();
 }
 
 void Emulator::handleReady1() {
@@ -420,11 +427,21 @@ void Emulator::handleReady1() {
    *  else: enter IDLE state
    **/
 
-  if (START_OF_FRAME) {
-    disableAin1Pullup();
+  // if (START_OF_FRAME) {
+    // disableAin1Pullup();
     uint8_t read = rxMiller();
     // SDD_REQ/SEL_REQ frames will be 2+ bytes long
-    if (read >= 2) {
+    if (read == 1) {
+      nfc_short_frame_t *short_frame = (nfc_short_frame_t *) buffer;
+      if (short_frame->cmd == SENS_REQ || short_frame->cmd == ALL_REQ) {
+        // after recieving ALL_REQ or SENS_REQ, 
+        //  nfc device must transmit SENS_RES and enter READY state
+        txManchester(SENS_RES[nfcid1Size], sizeof(SENS_RES[nfcid1Size]));
+        state = ST_READY_CL1;
+        GRN_ON();
+        return;
+      }
+    } else if (read >= 2) {
       nfc_sdd_frame_t *sdd_frame = (nfc_sdd_frame_t *) buffer;
       // frame format:
       //   byte 0 bits 7..4: SDD_REQ [0b1001]
@@ -435,8 +452,10 @@ void Emulator::handleReady1() {
         if (sdd_frame->byte_count == 0x2) {
           // 0 extra bytes: Valid SDD_REQ CL1 command
           txManchester(nfcid[0], sizeof(nfcid[0]));
+          Serial.print("SDD_REQ CL1\n");
         } else if (sdd_frame->byte_count == 0x7) {
           // 5 extra bytes: Potentially valid SEL_REQ CL1 command
+          Serial.print("SEL_REQ CL1\n");
           if (memcmp(buffer + 2, nfcid[0], sizeof(nfcid[0])) == 0) {
             // if matching uid: send SEL_RES resp
             uint8_t sel_res = 0b00000000;
@@ -449,18 +468,21 @@ void Emulator::handleReady1() {
               sel_res |= (1 << 3);
               txManchester(&sel_res, 1);
               state = ST_READY_CL2;
+              RED_ON();
+              Serial.print("CL1->CL2\n");
             } else {
               // CL1 uid, tx response and switch to ACTIVE state
               txManchester(&sel_res, 1);
               state = ST_ACTIVE;
+              Serial.print("CL1->ACTIVE\n");
             }
           }
         }
       }
     }
-    enableAin1Pullup();
-  }
-  clearAcInterrupt();
+    // enableAin1Pullup();
+  // }
+  // clearAcInterrupt();
 }
 
 void Emulator::handleReady2() {
@@ -506,6 +528,7 @@ void Emulator::handleReady2() {
               // CL2 uid, tx response and switch to ACTIVE state
               txManchester(&sel_res, 1);
               state = ST_ACTIVE;
+              BLU_ON();
             }
           }
         }
@@ -563,7 +586,24 @@ void Emulator::handleReady3() {
   clearAcInterrupt();
 }
 
-void Emulator::handleActive() {}
+void Emulator::handleActive() {
+  /**
+   * ACTIVE state:
+   *  todo
+   **/
+
+  if (START_OF_FRAME) {
+    disableAin1Pullup();
+    uint8_t read = rxMiller();
+    
+    if (read) {
+      Serial.hexdump(buffer, read);
+    }
+
+    enableAin1Pullup();
+  }
+  clearAcInterrupt();
+}
 
 void Emulator::handleSleep() {
   /**
