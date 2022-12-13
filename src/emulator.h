@@ -22,6 +22,7 @@ namespace NfcEmu {
 
 typedef enum {
   ST_IDLE,
+  ST_READY,
   ST_READY_CL1,
   ST_READY_CL2,
   ST_READY_CL3,
@@ -50,12 +51,12 @@ private:
   uint8_t rxMiller();
   void txManchester(const uint8_t *buf, uint8_t count);
 
-  void handleIdle();
-  void handleReady1();
-  void handleReady2();
-  void handleReady3();
-  void handleActive();
-  void handleSleep();
+  uint8_t rx();
+
+  void handleIdle(uint8_t bytes);
+  void handleReady(uint8_t bytes);
+  void handleActive(uint8_t bytes);
+  void handleSleep(uint8_t bytes);
 };
 
 };

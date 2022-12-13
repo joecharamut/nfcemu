@@ -23,7 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using namespace NfcEmu;
 
-#define force_inline inline __attribute__((always_inline))
+// #define force_inline inline __attribute__((always_inline))
+#define force_inline 
 #define __packed __attribute__((packed))
 
 //#define USE_OC0A
@@ -49,49 +50,6 @@ static force_inline void disableT0Out() {
   #ifdef USE_OC0B
   DDRD &= ~(1<<PD5);
   #endif
-}
-
-static force_inline void setupTimer0() {
-  // clear timer registers
-  TCCR0A = 0;
-  TCCR0B = 0;
-  
-  // WGM02=0, WGM01=1, WGM00=0 - CTC Mode
-  TCCR0A = (1<<WGM01);
-
-  // CS02=0, CS01=0, CS00=1 - clk/1 (no prescale)
-  TCCR0B = (1<<CS00);
-
-  #ifdef USE_OC0A
-  // Toggle OC0A on compare match
-  TCCR0A |= (1<<COM0A0);
-  #endif
-
-  #ifdef USE_OC0B
-  // Toggle OC0B on compare match
-  TCCR0A |= (1<<COM0B0);
-  #endif
-
-  disableT0Out();
-}
-
-static force_inline void setupTimer1() {
-  // CTC-Mode and no clock divider for 16 bit timer1: clk/1
-  TCCR1B = (1<<WGM12) | (1<<CS10);
-}
-
-static force_inline void setupAnalog() {
-  // Port D Bit 6: AIN0, 
-  DDRD &= ~(1<<PD6); // input
-  PORTD &= ~(1<<PD6); // no pullup
-
-  // Port D Bit 7: AIN1, 
-  DDRD &= ~(1<<PD7); // input
-  PORTD &= ~(1<<PD7); // no pullup
-
-  // Setup Analog Comparator, Enable (ACD=0), Set Analog Comparator
-  // Interrupt Flag on Rising Output Edge (ACIS0, ACIS1)
-  ACSR = (0<<ACD) | (1<<ACIS0) | (1<<ACIS1);
 }
 
 #define AC_INTERRUPT_SET ((ACSR & (1<<ACI)) != 0)
@@ -126,9 +84,50 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   this->storage = storage;
   this->storageSize = storageSize;
 
-  setupTimer0();
-  setupTimer1();
-  setupAnalog();
+  /* Timer0 Setup */
+  // clear timer registers
+  TCCR0A = 0;
+  TCCR0B = 0;
+  
+  // WGM02=0, WGM01=1, WGM00=0 - CTC Mode
+  TCCR0A = (1<<WGM01);
+
+  // CS02=0, CS01=0, CS00=1 - clk/1 (no prescale)
+  TCCR0B = (1<<CS00);
+
+  #ifdef USE_OC0A
+  // Toggle OC0A on compare match
+  TCCR0A |= (1<<COM0A0);
+  #endif
+
+  #ifdef USE_OC0B
+  // Toggle OC0B on compare match
+  TCCR0A |= (1<<COM0B0);
+  #endif
+
+  disableT0Out();
+  /* End Timer0 */
+
+  /* Setup Timer1 */
+  // CTC-Mode and no clock divider for 16 bit timer1: clk/1
+  TCCR1B = (1<<WGM12) | (1<<CS10);
+  /* End Timer1 */
+
+  /* Setup Analog */
+  // Port D Bit 6: AIN0, 
+  DDRD &= ~(1<<PD6); // input
+  PORTD &= ~(1<<PD6); // no pullup
+
+  // Port D Bit 7: AIN1, 
+  DDRD &= ~(1<<PD7); // input
+  PORTD &= ~(1<<PD7); // no pullup
+
+  // Setup Analog Comparator, Enable (ACD=0), Set Analog Comparator
+  // Interrupt Flag on Rising Output Edge (ACIS0, ACIS1)
+  ACSR = (0<<ACD) | (1<<ACIS0) | (1<<ACIS1);
+  /* End Analog */
+
+
   GRN_SETUP();
   RED_SETUP();
   BLU_SETUP();
@@ -181,6 +180,10 @@ void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
 #define CLCM CLC_PBIT * 7 / 4
 #define CLCL CLC_PBIT * 9 / 4
 
+#define NFC_CARRIER 13560000UL
+#define CLOCKS_PER_BIT (128 * (F_CPU / NFC_CARRIER))
+
+
 #define FDT_DELAY_BD9 (uint16_t)(9.0 * 128 * F_CPU / RFID_FREQU - 1) //Nr of cycles-1 for 9 bit durations
 #define FDT_DELAY_BIT0 (FDT_DELAY_BD9 + 20 - CLCL)
 #define FDT_DELAY_BIT1 (FDT_DELAY_BD9 + 84 - CLCL)
@@ -195,6 +198,91 @@ static force_inline void resetRxFlags() {
   TCNT1 = 0;
   TIFR1 |= (1<<OCF1A); //Clear Timer Overflow Flag 
   ACSR |= (1<<ACI); //Clear Analog Comparator Interrupt Flag
+}
+
+#define TIMER1_MATCHED (TIFR1 & (1<<OCF1A))
+static void resetTimer1() {
+  TCNT1 = 0;
+  // clear compare match A flag 
+  TIFR1 |= (1<<OCF1A);
+}
+
+uint8_t Emulator::rx() {
+  uint8_t timer;
+  uint8_t bytePos = 0;
+  uint8_t bitPos = 0;
+
+  // setup timer 1 to trip at 1 bit duration
+  OCR1A = CLOCKS_PER_BIT + 1;
+  // resetTimer1();
+
+  // initialize buffer
+  buffer[0] = 0;
+
+  // try to wait for modulation to be pulled low to indicate start of frame
+  uint8_t attempts = 0xff;
+  while (!AC_INTERRUPT_SET) {
+    if (TIMER1_MATCHED) {
+      resetTimer1();
+      attempts--;
+      // failed to catch start of frame
+      if (!attempts) return 0;
+    }
+  }
+  resetRxFlags();
+
+  GRN_ON();
+
+  uint8_t lastBit = 0;
+  do {
+    do {
+      if (AC_INTERRUPT_SET) {
+        timer = TCNT1;
+        // resetRxFlags();
+
+        if (bitPos >= 8) {
+          bitPos -= 8;
+          bytePos++;
+        }
+
+        // Serial.print("t="); Serial.print(timer, DEC); Serial.print("\n");
+        if (timer < (CLOCKS_PER_BIT / 2)) {
+          // modulation at start of bit duration: pattern Z
+          lastBit = 0;
+        } else {
+          // modulation after half of bit duration: pattern X (always a 1 bit)
+          buffer[bytePos] |= (1 << bitPos);
+          lastBit++;
+        }
+
+        // inc bit position
+        bitPos++;
+        
+        // wait for end of bit period
+        while (!TIMER1_MATCHED);
+        resetRxFlags();
+      }
+    } while (!TIMER1_MATCHED);
+
+    // no modulation in bit duration: pattern Y
+    if (lastBit) {
+      // last bit was 1 / pattern X: valid 0 bit
+      lastBit = 0;
+      bitPos++;
+    } else {
+      // else: no modulation for 2 bit durations, end of frame
+      break;
+    }
+  } while (1);
+
+  if (bitPos >= 8) {
+    bitPos -= 8;
+    bytePos++;
+  }
+
+  if (bitPos) { Serial.print("bits="); Serial.print(bitPos, DEC); Serial.print("\n"); }
+
+  return bytePos;
 }
 
 uint8_t Emulator::rxMiller() {
@@ -255,7 +343,6 @@ uint8_t Emulator::rxMiller() {
   TIFR1 |= (1<<OCF1A);
   
   if (hbitPos > 7) bytePos++;
-
   return bytePos;
 }
 
@@ -356,8 +443,10 @@ typedef struct __packed {
 } nfc_sdd_frame_t;
 
 
-static const uint8_t ATQA[] = {0x44, 0x00};
-static const uint8_t SLP_REQ[] = {0x50, 0x00};
+static uint8_t ATQA[] = {0x44, 0x00};
+static uint8_t SLP_REQ[] = {0x50, 0x00};
+static uint8_t SAK_NC[3] = {0x04, 0xDA, 0x17}; //Select acknowledge uid not complete
+static uint8_t SAK_C[3] = {0x00, 0xFE, 0x51}; //Select acknowledge uid complete, Type 2 (PICC not compliant to ISO/IEC 14443-4)
 
 static const uint8_t SENS_RES[3][2] = {
   { 0b00000100, 0b00000000 }, // SEL_RES CL1 ( 4 UID bytes)
@@ -376,48 +465,72 @@ void Emulator::tick() {
   RED_OFF();
   BLU_OFF();
 
-  do {
-    switch (state) {
-      case ST_IDLE:       handleIdle();   break;
-      case ST_READY_CL1:  handleReady1(); break;
-      case ST_READY_CL2:  handleReady2(); break;
-      case ST_READY_CL3:  handleReady2(); break;
-      case ST_ACTIVE:     handleActive(); break;
-      case ST_SLEEP:      handleSleep();  break;
+  if (!START_OF_FRAME) {
+    clearAcInterrupt();
+    return;
+  }
 
-      default: break;
+  disableAin1Pullup();
+
+  uint8_t attempts = 16;
+  uint8_t read = 0;
+  state = ST_IDLE;
+  do {
+    read = rx();
+
+    if (state == ST_IDLE) {
+      handleIdle(read);
+    } else if (state == ST_SLEEP) {
+      handleSleep(read);
+    } else if (state == ST_READY) {
+      handleReady(read);
+    } else if (state == ST_ACTIVE) {
+      handleActive(read);
     }
-  } while (state != ST_IDLE);
+
+    if (read > 1) Serial.hexdump(buffer, read);
+    if (!read) {
+      --attempts;
+    } else {
+      attempts = 32;
+    }
+  } while (attempts);
+  // Serial.print("fail\n");
+
+  enableAin1Pullup();
 }
 
-void Emulator::handleIdle() {
+void Emulator::handleIdle(uint8_t bytes) {
   /**
    * IDLE state:
-   *  if recieve ALL_REQ or SENS_REQ: switch to READY state
+   *  if recieve ALL_REQ or SENS_REQ: send SENS_RES and switch to READY state
    *  else: stay in IDLE state
    **/
-
-  if (START_OF_FRAME) {
-    disableAin1Pullup();
-    uint8_t read = rxMiller();
-    // ALL_REQ/SENS_REQ are short frames = 1 bytes
-    if (read == 1) {
-      nfc_short_frame_t *short_frame = (nfc_short_frame_t *) buffer;
-      if (short_frame->cmd == SENS_REQ || short_frame->cmd == ALL_REQ) {
-        // after recieving ALL_REQ or SENS_REQ, 
-        //  nfc device must transmit SENS_RES and enter READY state
-        txManchester(SENS_RES[nfcid1Size], sizeof(SENS_RES[nfcid1Size]));
-        state = ST_READY_CL1;
-        GRN_ON();
-        return;
-      }
-    }
-    // enableAin1Pullup();
-    clearAcInterrupt();
+  if (bytes == 1 && (buffer[0] == SENS_REQ || buffer[0] == ALL_REQ)) {
+    txManchester(ATQA, sizeof(ATQA));
+    state = ST_READY;
+    GRN_ON();
   }
 }
 
-void Emulator::handleReady1() {
+void Emulator::handleSleep(uint8_t bytes) {
+  /**
+   * SLEEP state:
+   *  if recieve ALL_REQ: switch to READY state
+   *  else: stay in SLEEP state
+   **/
+
+  // ALL_REQ is a short frame = 1 bytes
+  if (bytes == 1 && buffer[0] == ALL_REQ) {
+    // after recieving ALL_REQ, 
+    //  nfc device must transmit SENS_RES and enter READY state
+    txManchester(SENS_RES[nfcid1Size], sizeof(SENS_RES[nfcid1Size]));
+    state = ST_READY;
+    RED_ON();
+  }
+}
+
+void Emulator::handleReady(uint8_t bytes) {
   /**
    * READY_CL1 state:
    *  if recieve SDD_REQ CL1, send NFCID1 CL1 and stay in READY_CL1 state
@@ -427,205 +540,86 @@ void Emulator::handleReady1() {
    *  else: enter IDLE state
    **/
 
-  // if (START_OF_FRAME) {
-    // disableAin1Pullup();
-    uint8_t read = rxMiller();
-    // SDD_REQ/SEL_REQ frames will be 2+ bytes long
-    if (read == 1) {
-      nfc_short_frame_t *short_frame = (nfc_short_frame_t *) buffer;
-      if (short_frame->cmd == SENS_REQ || short_frame->cmd == ALL_REQ) {
-        // after recieving ALL_REQ or SENS_REQ, 
-        //  nfc device must transmit SENS_RES and enter READY state
-        txManchester(SENS_RES[nfcid1Size], sizeof(SENS_RES[nfcid1Size]));
-        state = ST_READY_CL1;
-        GRN_ON();
+  // SDD_REQ frames must always be >2 bytes
+  // if (bytes < 2) {
+  //   state = ST_IDLE;
+  //   return;
+  // }
+
+  if (bytes == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
+    state = ST_SLEEP;
+    GRN_OFF();
+    return;
+  }
+
+  BLU_ON();
+
+  // frame format:
+  //   byte 0 bits 7..4: SDD_REQ [0b1001]
+  //   byte 0 bits 3..0: CLx [0b0011 = CL1, 0b0101 = CL2, 0b0111 = CL3]
+  //   byte 1 bits 7..4: byte count [0x2 = 0 extra bytes, 0x7 = 5 extra bytes]
+  //   byte 1 bits 3..0: bit count [always 0 for NFCA?]
+  nfc_sdd_frame_t *sdd_frame = ((nfc_sdd_frame_t *) buffer);
+
+  // command nybble must be SDD_REQ
+  if (sdd_frame->cmd != SDD_REQ) {
+    state = ST_IDLE;
+    return;
+  }
+
+  // Derive an index from the CLx identifier
+  // CL1: (0b0011 >> 1) - 1 => (0b0001) - 1 -> 0
+  // CL2: (0b0101 >> 1) - 1 => (0b0010) - 1 -> 1
+  // CL3: (0b0111 >> 1) - 1 => (0b0011) - 1 -> 2
+  uint8_t col_level = (sdd_frame->col >> 1) - 1;
+
+  if (sdd_frame->byte_count == 0x2) {
+    // frame size: 2 bytes == 0 extra bytes: SDD_REQ command
+    //  when rx SDD_REQ, tx requested nfcid1 collision level
+    txManchester(nfcid[col_level], 5);
+    // Serial.print("SDD_REQ CL"); Serial.print(col_level, DEC); Serial.print("\n");
+    return;
+  } else if (sdd_frame->byte_count == 0x7) {
+    // frame size: 7 bytes == 5 extra bytes: SEL_REQ command
+    Serial.print("SEL_REQ CL"); Serial.print(col_level, DEC); Serial.print("\n");
+    if (memcmp(buffer + 2, nfcid[col_level], sizeof(nfcid[col_level])) == 0) {
+      // if matching uid: send SEL_RES resp
+      uint8_t sel_res = 0b00000000;
+      //                  -tt--c--
+      // - = unused
+      // tt = tag type (00 = type 2, 01 = type 4A, 10 = nfc-dep, 11 = type 4A + nfc-dep)
+      // c = cascade bit (1 = not complete, 0 = complete)
+      if (col_level < nfcid1Size) {
+        // set cascade bit and stay in READY state
+        sel_res |= (1 << 3);
+        txManchester(SAK_NC, sizeof(SAK_NC));
+        RED_ON();
+      } else {
+        // hopefully sent whole id at this point, tx response and switch to ACTIVE state
+        txManchester(SAK_C, sizeof(SAK_C));
+        state = ST_ACTIVE;
         return;
       }
-    } else if (read >= 2) {
-      nfc_sdd_frame_t *sdd_frame = (nfc_sdd_frame_t *) buffer;
-      // frame format:
-      //   byte 0 bits 7..4: SDD_REQ [0b1001]
-      //   byte 0 bits 3..0: CLx [0b0011 = CL1, 0b0101 = CL2, 0b0111 = CL3]
-      //   byte 1 bits 7..4: byte count [0x2 = 0 extra bytes, 0x7 = 5 extra bytes]
-      //   byte 1 bits 3..0: bit count [always 0 for NFCA?]
-      if (sdd_frame->cmd == SDD_REQ && sdd_frame->col == NFC_CL1) {
-        if (sdd_frame->byte_count == 0x2) {
-          // 0 extra bytes: Valid SDD_REQ CL1 command
-          txManchester(nfcid[0], sizeof(nfcid[0]));
-          Serial.print("SDD_REQ CL1\n");
-        } else if (sdd_frame->byte_count == 0x7) {
-          // 5 extra bytes: Potentially valid SEL_REQ CL1 command
-          Serial.print("SEL_REQ CL1\n");
-          if (memcmp(buffer + 2, nfcid[0], sizeof(nfcid[0])) == 0) {
-            // if matching uid: send SEL_RES resp
-            uint8_t sel_res = 0b00000000;
-            //                  -tt--c--
-            // - = unused
-            // tt = tag type (00 = type 2, 01 = type 4A, 10 = nfc-dep, 11 = type 4A + nfc-dep)
-            // c = cascade bit (1 = not complete, 0 = complete)
-            if (nfcid1Size != 0) {
-              // CL2 or CL3 uid, set cascade bit and go to next READY_CLx state
-              sel_res |= (1 << 3);
-              txManchester(&sel_res, 1);
-              state = ST_READY_CL2;
-              RED_ON();
-              Serial.print("CL1->CL2\n");
-            } else {
-              // CL1 uid, tx response and switch to ACTIVE state
-              txManchester(&sel_res, 1);
-              state = ST_ACTIVE;
-              Serial.print("CL1->ACTIVE\n");
-            }
-          }
-        }
-      }
+    } else {
+      // id doesn't match: back to idle
+      Serial.print("fail: id\n");
+      state = ST_IDLE;
+      return;
     }
-    // enableAin1Pullup();
-  // }
-  // clearAcInterrupt();
-}
-
-void Emulator::handleReady2() {
-  /**
-   * READY_CL2 state:
-   *  if recieve SDD_REQ CL2, send NFCID1 CL2 and stay in READY_CL2 state
-   *  else if recieve SEL_REQ CL2 with matching NFCID1 CL2:
-   *    if double size NFCID1: enter ACTIVE state
-   *    else (triple size NFCID1): enter READY_CL3 state
-   *  else: enter IDLE state
-   **/
-
-  if (START_OF_FRAME) {
-    disableAin1Pullup();
-    uint8_t read = rxMiller();
-    // SDD_REQ/SEL_REQ frames will be 2+ bytes long
-    if (read >= 2) {
-      nfc_sdd_frame_t *sdd_frame = (nfc_sdd_frame_t *) buffer;
-      // frame format:
-      //   byte 0 bits 7..4: SDD_REQ [0b1001]
-      //   byte 0 bits 3..0: CLx [0b0011 = CL1, 0b0101 = CL2, 0b0111 = CL3]
-      //   byte 1 bits 7..4: byte count [0x2 = 0 extra bytes, 0x7 = 5 extra bytes]
-      //   byte 1 bits 3..0: bit count [always 0 for NFCA?]
-      if (sdd_frame->cmd == SDD_REQ && sdd_frame->col == NFC_CL2) {
-        if (sdd_frame->byte_count == 0x2) {
-          // 0 extra bytes: Valid SDD_REQ CL2 command
-          txManchester(nfcid[1], sizeof(nfcid[1]));
-        } else if (sdd_frame->byte_count == 0x7) {
-          // 5 extra bytes: Potentially valid SEL_REQ CL2 command
-          if (memcmp(buffer + 2, nfcid[1], sizeof(nfcid[1])) == 0) {
-            // if matching uid: send SEL_RES resp
-            uint8_t sel_res = 0b00000000;
-            //                  -tt--c--
-            // - = unused
-            // tt = tag type (00 = type 2, 01 = type 4A, 10 = nfc-dep, 11 = type 4A + nfc-dep)
-            // c = cascade bit (1 = not complete, 0 = complete)
-            if (nfcid1Size != 1) {
-              // CL3 uid, set cascade bit and go to next READY_CLx state
-              sel_res |= (1 << 3);
-              txManchester(&sel_res, 1);
-              state = ST_READY_CL3;
-            } else {
-              // CL2 uid, tx response and switch to ACTIVE state
-              txManchester(&sel_res, 1);
-              state = ST_ACTIVE;
-              BLU_ON();
-            }
-          }
-        }
-      }
-    }
-    enableAin1Pullup();
+  } else {
+    // other number of bytes: unsupported
+    // Serial.print("fail: bc\n");
+    // state = ST_IDLE;
+    // return;
   }
-  clearAcInterrupt();
 }
 
-void Emulator::handleReady3() {
-  /**
-   * READY_CL3 state:
-   *  if recieve SDD_REQ CL3, send NFCID1 CL3 and stay in READY_CL3 state
-   *  else if recieve SEL_REQ CL3 with matching NFCID1 CL3:
-   *    if triple size NFCID1: enter ACTIVE state
-   *  else: enter IDLE state
-   **/
-
-  if (START_OF_FRAME) {
-    disableAin1Pullup();
-    uint8_t read = rxMiller();
-    // SDD_REQ/SEL_REQ frames will be 2+ bytes long
-    if (read >= 2) {
-      nfc_sdd_frame_t *sdd_frame = (nfc_sdd_frame_t *) buffer;
-      // frame format:
-      //   byte 0 bits 7..4: SDD_REQ [0b1001]
-      //   byte 0 bits 3..0: CLx [0b0011 = CL1, 0b0101 = CL2, 0b0111 = CL3]
-      //   byte 1 bits 7..4: byte count [0x2 = 0 extra bytes, 0x7 = 5 extra bytes]
-      //   byte 1 bits 3..0: bit count [always 0 for NFCA?]
-      if (sdd_frame->cmd == SDD_REQ && sdd_frame->col == NFC_CL3) {
-        if (sdd_frame->byte_count == 0x2) {
-          // 0 extra bytes: Valid SDD_REQ CL3 command
-          txManchester(nfcid[2], sizeof(nfcid[2]));
-        } else if (sdd_frame->byte_count == 0x7) {
-          // 5 extra bytes: Potentially valid SEL_REQ CL3 command
-          if (memcmp(buffer + 2, nfcid[2], sizeof(nfcid[2])) == 0) {
-            // if matching uid: send SEL_RES resp
-            uint8_t sel_res = 0b00000000;
-            //                  -tt--c--
-            // - = unused
-            // tt = tag type (00 = type 2, 01 = type 4A, 10 = nfc-dep, 11 = type 4A + nfc-dep)
-            // c = cascade bit (1 = not complete, 0 = complete)
-            if (nfcid1Size == 2) {
-              // CL3 uid, tx response and switch to ACTIVE state
-              txManchester(&sel_res, 1);
-              state = ST_ACTIVE;
-            }
-          }
-        }
-      }
-    }
-    enableAin1Pullup();
-  }
-  clearAcInterrupt();
-}
-
-void Emulator::handleActive() {
+void Emulator::handleActive(uint8_t bytes) {
   /**
    * ACTIVE state:
    *  todo
    **/
-
-  if (START_OF_FRAME) {
-    disableAin1Pullup();
-    uint8_t read = rxMiller();
-    
-    if (read) {
-      Serial.hexdump(buffer, read);
-    }
-
-    enableAin1Pullup();
-  }
-  clearAcInterrupt();
+  // if (bytes) { Serial.hexdump(buffer, bytes); }
 }
 
-void Emulator::handleSleep() {
-  /**
-   * SLEEP state:
-   *  if recieve ALL_REQ: switch to READY state
-   *  else: stay in SLEEP state
-   **/
 
-  if (START_OF_FRAME) {
-    disableAin1Pullup();
-    uint8_t read = rxMiller();
-    // ALL_REQ is a short frame = 1 bytes
-    if (read == 1) {
-      nfc_short_frame_t *short_frame = (nfc_short_frame_t *) buffer;
-      if (short_frame->cmd == ALL_REQ) {
-        // after recieving ALL_REQ, 
-        //  nfc device must transmit SENS_RES and enter READY state
-        txManchester(SENS_RES[nfcid1Size], sizeof(SENS_RES[nfcid1Size]));
-        state = ST_READY_CL1;
-      }
-    }
-    enableAin1Pullup();
-  }
-  clearAcInterrupt();
-}
