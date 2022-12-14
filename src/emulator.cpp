@@ -80,6 +80,8 @@ static force_inline void clearOCF1A() { TIFR1 |= (1<<OCF1A); }
 #define BLU_ON()    do { PORTB |=  (1<<PB2); } while (0)
 #define BLU_OFF()   do { PORTB &= ~(1<<PB2); } while (0)
 
+Emulator::Emulator() {}
+
 void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   this->storage = storage;
   this->storageSize = storageSize;
@@ -112,6 +114,14 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   // CTC-Mode and no clock divider for 16 bit timer1: clk/1
   TCCR1B = (1<<WGM12) | (1<<CS10);
   /* End Timer1 */
+
+  /* Setup Timer2 */
+  // CTC-Mode
+  TCCR2A = (1<<WGM21);
+  // clk/1024 prescale
+  TCCR2B = (1<<CS22) | (1<<CS21) | (1<<CS20);
+  /* End Timer2 */
+
 
   /* Setup Analog */
   // Port D Bit 6: AIN0, 
@@ -181,7 +191,19 @@ void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
 #define CLCL CLC_PBIT * 9 / 4
 
 #define NFC_CARRIER 13560000UL
-#define CLOCKS_PER_BIT (128 * (F_CPU / NFC_CARRIER))
+#define CLOCKS_PER_BIT (uint16_t)(128 * (F_CPU / NFC_CARRIER))
+
+typedef enum {
+  BC_1QUARTER = CLOCKS_PER_BIT * 1/4,
+  BC_2QUARTER = CLOCKS_PER_BIT * 2/4,
+  BC_3QUARTER = CLOCKS_PER_BIT * 3/4,
+  BC_4QUARTER = CLOCKS_PER_BIT * 4/4,
+  BC_5QUARTER = CLOCKS_PER_BIT * 5/4,
+  BC_6QUARTER = CLOCKS_PER_BIT * 6/4,
+  BC_7QUARTER = CLOCKS_PER_BIT * 7/4,
+  BC_8QUARTER = CLOCKS_PER_BIT * 8/4,
+  BC_9QUARTER = CLOCKS_PER_BIT * 9/4,
+} bit_clock_value_t;
 
 
 #define FDT_DELAY_BD9 (uint16_t)(9.0 * 128 * F_CPU / RFID_FREQU - 1) //Nr of cycles-1 for 9 bit durations
@@ -211,10 +233,11 @@ uint8_t Emulator::rx() {
   uint8_t timer;
   uint8_t bytePos = 0;
   uint8_t bitPos = 0;
+  uint8_t partialBitPos = 0;
 
-  // setup timer 1 to trip at 1 bit duration
-  OCR1A = CLOCKS_PER_BIT + 1;
-  // resetTimer1();
+  // setup timer 1 to trip after 2.25 bit durations
+  OCR1A = BC_9QUARTER;
+  resetTimer1();
 
   // initialize buffer
   buffer[0] = 0;
@@ -231,56 +254,74 @@ uint8_t Emulator::rx() {
   }
   resetRxFlags();
 
-  GRN_ON();
+  // GRN_ON();
 
   uint8_t lastBit = 0;
   do {
-    do {
-      if (AC_INTERRUPT_SET) {
-        timer = TCNT1;
-        // resetRxFlags();
+    if (AC_INTERRUPT_SET) {
+      timer = TCNT1;
+      resetRxFlags();
 
-        if (bitPos >= 8) {
-          bitPos -= 8;
+      // if (bitPos >= 8) {
+      //   bitPos -= 8;
+      //   bytePos++;
+      // }
+
+      // Serial.print("t="); Serial.print(timer, DEC); Serial.print("\n");
+
+      /**
+       * pattern X: hi before 0.5bd, lo after 0.5bd
+       * pattern Y: hi before 0.5bd, hi after 0.5bd
+       * pattern Z: lo before 0.5bd, hi after 0.5bd
+       * 
+       * seq YY: Y after Y = end of synchronization (EoS)
+       * seq ZY: Y after Z = end of synchronization (EoS)
+       * seq XY: Y after X = logic 0
+       * seq YZ: Z after Y = logic 0
+       * seq ZZ: Z after Z = logic 0
+       * seq XX: X after * = logic 1 
+       * seq YX: X after * = logic 1 
+       * seq ZX: X after * = logic 1 
+       **/ 
+
+      // timer < 1.25bd
+      // 1.25bd < timer < 1.75bd
+      // 1.75bd < timer < 2.25bd
+      // timer > 2.25bd => end of frame
+
+      partialBitPos += (timer > BC_5QUARTER) + (timer > BC_7QUARTER);
+
+        if (partialBitPos > 17) {
           bytePos++;
+          partialBitPos -= 18;
+          buffer[bytePos] = 0;
         }
-
-        // Serial.print("t="); Serial.print(timer, DEC); Serial.print("\n");
-        if (timer < (CLOCKS_PER_BIT / 2)) {
-          // modulation at start of bit duration: pattern Z
-          lastBit = 0;
-        } else {
-          // modulation after half of bit duration: pattern X (always a 1 bit)
-          buffer[bytePos] |= (1 << bitPos);
-          lastBit++;
-        }
-
-        // inc bit position
-        bitPos++;
-        
-        // wait for end of bit period
-        while (!TIMER1_MATCHED);
-        resetRxFlags();
-      }
-    } while (!TIMER1_MATCHED);
-
-    // no modulation in bit duration: pattern Y
-    if (lastBit) {
-      // last bit was 1 / pattern X: valid 0 bit
-      lastBit = 0;
-      bitPos++;
-    } else {
-      // else: no modulation for 2 bit durations, end of frame
-      break;
+       
+        buffer[bytePos] |= RX_MASK[partialBitPos];
+            
+        partialBitPos += 2;
+      
+      // wait for end of bit period
+      // while (!TIMER1_MATCHED);
+      
     }
-  } while (1);
+  } while (!TIMER1_MATCHED);
 
-  if (bitPos >= 8) {
-    bitPos -= 8;
+    // // no modulation in bit duration: pattern Y
+    // if (lastBit) {
+    //   // last bit was 1 / pattern X: valid 0 bit
+    //   lastBit = 0;
+    //   bitPos++;
+    // } else {
+    //   // else: no modulation for 2 bit durations, end of frame
+    //   break;
+    // }
+
+  if (partialBitPos > 7) {
     bytePos++;
   }
 
-  if (bitPos) { Serial.print("bits="); Serial.print(bitPos, DEC); Serial.print("\n"); }
+  // if (bitPos) { Serial.print("bits="); Serial.print(bitPos, DEC); Serial.print("\n"); }
 
   return bytePos;
 }
@@ -472,30 +513,52 @@ void Emulator::tick() {
 
   disableAin1Pullup();
 
-  uint8_t attempts = 16;
+  uint8_t attempts = 0xff;
   uint8_t read = 0;
   state = ST_IDLE;
-  do {
-    read = rx();
 
+  // clk/128 * n ticks timeout
+  OCR2A = 0xFF;
+  TIFR2 |= (1<<OCF2A); // clear timer flag
+  uint8_t lastState = state;
+  do {
+    read = rxMiller();
+
+    GRN_OFF();
+    RED_OFF();
+    BLU_OFF();
+    
     if (state == ST_IDLE) {
+      GRN_ON();
       handleIdle(read);
     } else if (state == ST_SLEEP) {
+      RED_ON();
+      if (read) Serial.hexdump(buffer, read);
       handleSleep(read);
     } else if (state == ST_READY) {
+      BLU_ON();
       handleReady(read);
     } else if (state == ST_ACTIVE) {
       handleActive(read);
+    } else {
+      // invalid state?
+      Serial.print("INVALID STATE!! state="); Serial.print(state, DEC); Serial.print("??????\n");
+      break;
     }
 
+    // if (lastState != state) {
+    //   Serial.print("S"); Serial.print(lastState); Serial.print("->S"); Serial.print(state, DEC); Serial.print("\n");
+    // }
+
     if (read > 1) Serial.hexdump(buffer, read);
-    if (!read) {
-      --attempts;
-    } else {
-      attempts = 32;
+    if (read) {
+      // if data, reset timer
+      TCNT2 = 0;
+      TIFR2 |= (1<<OCF2A);
     }
-  } while (attempts);
-  // Serial.print("fail\n");
+  } while (state != ST_IDLE || !(TIFR2 & (1<<OCF2A))); // while timeout not reached
+  TIFR2 |= (1<<OCF2A);
+  // Serial.print("timeout\n");
 
   enableAin1Pullup();
 }
@@ -509,7 +572,10 @@ void Emulator::handleIdle(uint8_t bytes) {
   if (bytes == 1 && (buffer[0] == SENS_REQ || buffer[0] == ALL_REQ)) {
     txManchester(ATQA, sizeof(ATQA));
     state = ST_READY;
-    GRN_ON();
+    // GRN_ON();
+  } else if (bytes == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
+    state = ST_SLEEP;
+    Serial.print("[idle] SLP_REQ\n");
   }
 }
 
@@ -526,7 +592,7 @@ void Emulator::handleSleep(uint8_t bytes) {
     //  nfc device must transmit SENS_RES and enter READY state
     txManchester(SENS_RES[nfcid1Size], sizeof(SENS_RES[nfcid1Size]));
     state = ST_READY;
-    RED_ON();
+    Serial.print("WAKE\n");
   }
 }
 
@@ -548,11 +614,12 @@ void Emulator::handleReady(uint8_t bytes) {
 
   if (bytes == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
     state = ST_SLEEP;
-    GRN_OFF();
+    // GRN_OFF();
+    Serial.print("[ready] SLP_REQ\n");
     return;
   }
 
-  BLU_ON();
+  // BLU_ON();
 
   // frame format:
   //   byte 0 bits 7..4: SDD_REQ [0b1001]

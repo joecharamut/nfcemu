@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 namespace NfcEmu {
 
-typedef enum {
+enum ST_ENUM {
   ST_IDLE,
   ST_READY,
   ST_READY_CL1,
@@ -28,7 +28,10 @@ typedef enum {
   ST_READY_CL3,
   ST_ACTIVE,
   ST_SLEEP,
-} emu_state_t;
+
+  ST_MAX = 0xff,
+};
+typedef uint8_t emu_state_t;
 
 class Emulator {
 public:
@@ -37,16 +40,20 @@ public:
 
   void setUid(uint8_t *uid, uint8_t uidSize);
 
+  explicit Emulator();
+  Emulator(Emulator const &) = delete;
+  void operator=(Emulator) = delete;
+
 private:
-  uint8_t *storage;
-  uint16_t storageSize;
+  uint8_t *storage = nullptr;
+  uint16_t storageSize = 0;
 
-  uint8_t nfcid1Size;
-  uint8_t nfcid[3][5];
+  uint8_t nfcid1Size = 0;
+  uint8_t nfcid[3][5] = {};
 
-  uint8_t buffer[64];
+  uint8_t buffer[64] = {};
 
-  emu_state_t state;
+  volatile emu_state_t state = ST_IDLE;
 
   uint8_t rxMiller();
   void txManchester(const uint8_t *buf, uint8_t count);
