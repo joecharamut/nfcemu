@@ -56,6 +56,10 @@ int main() {
   Serial.print("CLCS="); Serial.print(CLCS); Serial.print("\n");
   Serial.print("CLCM="); Serial.print(CLCM); Serial.print("\n");
   Serial.print("CLCL="); Serial.print(CLCL); Serial.print("\n");
+
+  Serial.hexdump(emu.nfcid[0], 5);
+  Serial.hexdump(emu.nfcid[1], 5);
+  Serial.hexdump(emu.nfcid[2], 5);
   
   while (1) {
     emu.tick();

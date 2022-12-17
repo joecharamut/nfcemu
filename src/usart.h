@@ -28,6 +28,9 @@ public:
     void print(const char *str);
     void print(uint32_t num, uint8_t base = DEC);
     void hexdump(uint8_t *buf, uint8_t sz);
+
+private:
+    uint8_t printBuf[32] = {};
 };
 
 extern USART Serial;

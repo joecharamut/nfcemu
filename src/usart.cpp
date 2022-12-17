@@ -48,25 +48,28 @@ void USART::print(const char *str) {
     }
 }
 
+
 void USART::print(uint32_t num, uint8_t base) {
-    if (num < base) {
-        transmit(NUM_ALPHABET[num % base]);
-    } else {
-        print(num / base, base);
-        transmit(NUM_ALPHABET[num % base]);
+    uint8_t digits = 0;
+
+    do {
+        printBuf[digits] = NUM_ALPHABET[num % base];
+        digits++;
+        if (digits >= sizeof(printBuf)) break;
+        num /= base;
+    } while (num > 0);
+
+    while (digits) {
+        digits--;
+        transmit(printBuf[digits]);
     }
 }
 
 void USART::hexdump(uint8_t *buf, uint8_t sz) {
   print(sz, DEC); print(" bytes:\n");
-  for (uint8_t i = 0; i < sz; i += 16) {
-    print(i);
-    print("\t");
-    for (uint8_t j = 0; j < 16 && (i+j)<sz; j++) {
-      print(buf[i+j], HEX);
-      print(" ");
-    }
-    print("\n");
+  for (uint8_t i = 0; i < sz; i++) {
+    print(buf[i], HEX);
+    print(" ");
   }
   print("\n");
 }

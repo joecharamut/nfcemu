@@ -44,7 +44,9 @@ public:
   Emulator(Emulator const &) = delete;
   void operator=(Emulator) = delete;
 
-private:
+// private:
+  emu_state_t state = ST_IDLE;
+
   uint8_t *storage = nullptr;
   uint16_t storageSize = 0;
 
@@ -52,8 +54,6 @@ private:
   uint8_t nfcid[3][5] = {};
 
   uint8_t buffer[64] = {};
-
-  volatile emu_state_t state = ST_IDLE;
 
   uint8_t rxMiller();
   void txManchester(const uint8_t *buf, uint8_t count);

@@ -80,6 +80,11 @@ static force_inline void clearOCF1A() { TIFR1 |= (1<<OCF1A); }
 #define BLU_ON()    do { PORTB |=  (1<<PB2); } while (0)
 #define BLU_OFF()   do { PORTB &= ~(1<<PB2); } while (0)
 
+// pin 23
+#define YEL_SETUP() do { DDRC  |=  (1<<PC0); } while (0)
+#define YEL_ON()    do { PORTC |=  (1<<PC0); } while (0)
+#define YEL_OFF()   do { PORTC &= ~(1<<PC0); } while (0)
+
 Emulator::Emulator() {}
 
 void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
@@ -141,6 +146,7 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   GRN_SETUP();
   RED_SETUP();
   BLU_SETUP();
+  YEL_SETUP();
 }
 
 static void genBcc(uint8_t *buf) {
@@ -159,7 +165,7 @@ void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
     // 7 byte uid = Cascade Lv 2
 
     nfcid[0][0] = 0x88; // Cascade Tag = 88h
-    memcpy(nfcid[0], uid, 3);
+    memcpy(nfcid[0]+1, uid, 3);
     genBcc(nfcid[0]);
 
     memcpy(nfcid[1], uid+3, 4);
@@ -169,11 +175,11 @@ void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
     // 10 byte uid = Cascade Lv 3
 
     nfcid[0][0] = 0x88; // Cascade Tag = 88h
-    memcpy(nfcid[0], uid, 3);
+    memcpy(nfcid[0]+1, uid, 3);
     genBcc(nfcid[0]);
 
     nfcid[1][0] = 0x88; // Cascade Tag = 88h
-    memcpy(nfcid[1], uid+3, 3);
+    memcpy(nfcid[1]+1, uid+3, 3);
     genBcc(nfcid[1]);
 
     memcpy(nfcid[2], uid+6, 4);
@@ -370,6 +376,7 @@ uint8_t Emulator::rxMiller() {
         if(hbitPos > 17) {
           bytePos++;
           hbitPos -= 18;
+          if (bytePos >= sizeof(buffer)) break;
           buffer[bytePos] = 0;
         }
        
@@ -502,10 +509,6 @@ void Emulator::tick() {
   // big TODO: need to wait after rx-ing data
   // spec says minimum response time for tag->device is 87us
 
-  GRN_OFF();
-  RED_OFF();
-  BLU_OFF();
-
   if (!START_OF_FRAME) {
     clearAcInterrupt();
     return;
@@ -520,25 +523,25 @@ void Emulator::tick() {
   // clk/128 * n ticks timeout
   OCR2A = 0xFF;
   TIFR2 |= (1<<OCF2A); // clear timer flag
-  uint8_t lastState = state;
   do {
     read = rxMiller();
 
     GRN_OFF();
     RED_OFF();
     BLU_OFF();
+    YEL_OFF();
     
     if (state == ST_IDLE) {
       GRN_ON();
       handleIdle(read);
     } else if (state == ST_SLEEP) {
       RED_ON();
-      if (read) Serial.hexdump(buffer, read);
       handleSleep(read);
     } else if (state == ST_READY) {
       BLU_ON();
       handleReady(read);
     } else if (state == ST_ACTIVE) {
+      YEL_ON();
       handleActive(read);
     } else {
       // invalid state?
@@ -546,19 +549,20 @@ void Emulator::tick() {
       break;
     }
 
-    // if (lastState != state) {
-    //   Serial.print("S"); Serial.print(lastState); Serial.print("->S"); Serial.print(state, DEC); Serial.print("\n");
-    // }
-
-    if (read > 1) Serial.hexdump(buffer, read);
+    // if (read > 1 && (buffer[0] != 0x50)) Serial.hexdump(buffer, read);
     if (read) {
       // if data, reset timer
       TCNT2 = 0;
       TIFR2 |= (1<<OCF2A);
     }
-  } while (state != ST_IDLE || !(TIFR2 & (1<<OCF2A))); // while timeout not reached
+  } while (!(TIFR2 & (1<<OCF2A))); // while timeout not reached
   TIFR2 |= (1<<OCF2A);
   // Serial.print("timeout\n");
+
+  GRN_OFF();
+  RED_OFF();
+  BLU_OFF();
+  YEL_OFF();
 
   enableAin1Pullup();
 }
@@ -573,10 +577,9 @@ void Emulator::handleIdle(uint8_t bytes) {
     txManchester(ATQA, sizeof(ATQA));
     state = ST_READY;
     // GRN_ON();
-  } else if (bytes == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
+  }/* else if (bytes == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
     state = ST_SLEEP;
-    Serial.print("[idle] SLP_REQ\n");
-  }
+  }*/
 }
 
 void Emulator::handleSleep(uint8_t bytes) {
@@ -587,12 +590,11 @@ void Emulator::handleSleep(uint8_t bytes) {
    **/
 
   // ALL_REQ is a short frame = 1 bytes
-  if (bytes == 1 && buffer[0] == ALL_REQ) {
+  if (bytes == 1 && (buffer[0] == SENS_REQ || buffer[0] == ALL_REQ)) {
     // after recieving ALL_REQ, 
     //  nfc device must transmit SENS_RES and enter READY state
     txManchester(SENS_RES[nfcid1Size], sizeof(SENS_RES[nfcid1Size]));
     state = ST_READY;
-    Serial.print("WAKE\n");
   }
 }
 
@@ -612,12 +614,11 @@ void Emulator::handleReady(uint8_t bytes) {
   //   return;
   // }
 
-  if (bytes == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
+  /*if (bytes == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
     state = ST_SLEEP;
     // GRN_OFF();
-    Serial.print("[ready] SLP_REQ\n");
     return;
-  }
+  }*/
 
   // BLU_ON();
 
@@ -630,6 +631,7 @@ void Emulator::handleReady(uint8_t bytes) {
 
   // command nybble must be SDD_REQ
   if (sdd_frame->cmd != SDD_REQ) {
+    // if (bytes > 1) Serial.hexdump(buffer, bytes);
     state = ST_IDLE;
     return;
   }
@@ -645,39 +647,27 @@ void Emulator::handleReady(uint8_t bytes) {
     //  when rx SDD_REQ, tx requested nfcid1 collision level
     txManchester(nfcid[col_level], 5);
     // Serial.print("SDD_REQ CL"); Serial.print(col_level, DEC); Serial.print("\n");
-    return;
   } else if (sdd_frame->byte_count == 0x7) {
     // frame size: 7 bytes == 5 extra bytes: SEL_REQ command
     Serial.print("SEL_REQ CL"); Serial.print(col_level, DEC); Serial.print("\n");
     if (memcmp(buffer + 2, nfcid[col_level], sizeof(nfcid[col_level])) == 0) {
       // if matching uid: send SEL_RES resp
-      uint8_t sel_res = 0b00000000;
-      //                  -tt--c--
-      // - = unused
-      // tt = tag type (00 = type 2, 01 = type 4A, 10 = nfc-dep, 11 = type 4A + nfc-dep)
-      // c = cascade bit (1 = not complete, 0 = complete)
       if (col_level < nfcid1Size) {
-        // set cascade bit and stay in READY state
-        sel_res |= (1 << 3);
+        // send not complete reply
         txManchester(SAK_NC, sizeof(SAK_NC));
-        RED_ON();
       } else {
         // hopefully sent whole id at this point, tx response and switch to ACTIVE state
         txManchester(SAK_C, sizeof(SAK_C));
         state = ST_ACTIVE;
-        return;
       }
     } else {
       // id doesn't match: back to idle
-      Serial.print("fail: id\n");
+      Serial.print("expected:\n");
+      Serial.hexdump(nfcid[col_level], 5);
+      Serial.print("got:\n");
+      Serial.hexdump(buffer + 2, 5);
       state = ST_IDLE;
-      return;
     }
-  } else {
-    // other number of bytes: unsupported
-    // Serial.print("fail: bc\n");
-    // state = ST_IDLE;
-    // return;
   }
 }
 
