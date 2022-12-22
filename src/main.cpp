@@ -49,7 +49,9 @@ NfcEmu::Emulator emu;
 int main() {
   Serial.begin(9600);
   emu.setup(tagStorage, sizeof(tagStorage));
-  emu.setUid(tagUid, sizeof(tagUid));
+  if (emu.setUid(tagUid, sizeof(tagUid)) < 0) {
+    Serial.print("Invalid UID size\n");
+  }
   Serial.print("Hello world\n");
 
   Serial.print("CLC_PBIT="); Serial.print(CLC_PBIT); Serial.print("\n");

@@ -18,6 +18,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #pragma once
 #include <avr/io.h>
 
+#define __packed __attribute__((packed))
+
 namespace NfcEmu {
 
 enum ST_ENUM {
@@ -33,12 +35,44 @@ enum ST_ENUM {
 };
 typedef uint8_t emu_state_t;
 
+typedef enum {
+  ALL_REQ = 0x52,
+  SENS_REQ = 0x26,
+} nfc_short_cmd_t;
+
+typedef struct __packed {
+  nfc_short_cmd_t cmd;
+} nfc_short_frame_t;
+
+typedef enum {
+  NFC_CL1 = 0b0011,
+  NFC_CL2 = 0b0101,
+  NFC_CL3 = 0b0111,
+} collision_level_t;
+
+typedef enum {
+  SDD_REQ = 0b1001,
+} sdd_cmd_t;
+
+typedef struct __packed {
+  collision_level_t col : 4;
+  sdd_cmd_t cmd : 4;
+} nfc_sel_cmd_t;
+
+typedef struct __packed {
+  collision_level_t col : 4;
+  sdd_cmd_t cmd : 4;
+  uint8_t bit_count : 4;
+  uint8_t byte_count : 4;
+} nfc_sdd_frame_t;
+
+
 class Emulator {
 public:
   void setup(uint8_t *storage, uint16_t storageSize);
   void tick();
 
-  void setUid(uint8_t *uid, uint8_t uidSize);
+  int8_t setUid(uint8_t *uid, uint8_t uidSize);
 
   explicit Emulator();
   Emulator(Emulator const &) = delete;
@@ -46,6 +80,7 @@ public:
 
 // private:
   emu_state_t state = ST_IDLE;
+  uint8_t debugFlags = 0;
 
   uint8_t *storage = nullptr;
   uint16_t storageSize = 0;

@@ -25,32 +25,9 @@ using namespace NfcEmu;
 
 // #define force_inline inline __attribute__((always_inline))
 #define force_inline 
-#define __packed __attribute__((packed))
 
 //#define USE_OC0A
 #define USE_OC0B
-
-static force_inline void enableT0Out() {
-  // set OC0x to OUTPUT mode
-  #ifdef USE_OC0A
-  DDRD |= (1<<PD6);
-  #endif
-  
-  #ifdef USE_OC0B
-  DDRD |= (1<<PD5);
-  #endif
-}
-
-static force_inline void disableT0Out() {
-  // set OC0x to INPUT mode
-  #ifdef USE_OC0A
-  DDRD &= ~(1<<PD6);
-  #endif
-  
-  #ifdef USE_OC0B
-  DDRD &= ~(1<<PD5);
-  #endif
-}
 
 #define AC_INTERRUPT_SET ((ACSR & (1<<ACI)) != 0)
 static force_inline void clearAcInterrupt() {
@@ -85,6 +62,23 @@ static force_inline void clearOCF1A() { TIFR1 |= (1<<OCF1A); }
 #define YEL_ON()    do { PORTC |=  (1<<PC0); } while (0)
 #define YEL_OFF()   do { PORTC &= ~(1<<PC0); } while (0)
 
+#define STRINGIFY(x) DO_STRINGIFY(x)
+#define DO_STRINGIFY(x) #x
+
+#define DEBUG
+#ifdef DEBUG
+#define ASSERT(x) do { \
+  if (!(x)) { \
+    Serial.print("ASSERTION FAILED: (" #x ") in func "); \
+    Serial.print(__PRETTY_FUNCTION__); \
+    Serial.print(", line " STRINGIFY(__LINE__) "\n"); \
+    while (1); \
+  } \
+} while (0)
+#else
+#define ASSERT(x)
+#endif
+
 Emulator::Emulator() {}
 
 void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
@@ -112,7 +106,18 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   TCCR0A |= (1<<COM0B0);
   #endif
 
-  disableT0Out();
+  // setup load modulation pin as DDRxn=0, PORTxn=0 [INPUT, Hi-Z] initially,
+  // set to DDRxn=1, PORTxn=0 [OUTPUT, LOW] to sink current from field
+  #ifdef USE_OC0A
+  DDRD &= ~(1<<PD6);
+  PORTB &= ~(1<<PD6);
+  #endif
+  
+  #ifdef USE_OC0B
+  DDRD &= ~(1<<PD5);
+  PORTB &= ~(1<<PD5);
+  #endif
+
   /* End Timer0 */
 
   /* Setup Timer1 */
@@ -154,39 +159,60 @@ static void genBcc(uint8_t *buf) {
   buf[4] = buf[0] ^ buf[1] ^ buf[2] ^ buf[3];
 }
 
-void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
+int8_t Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
   if (uidSize <= 4) {
     // 4 byte uid = Cascade Lv 1
-    
-    memcpy(nfcid[0], uid, 4);
-    genBcc(nfcid[0]);
     nfcid1Size = 0;
+    
+    for (uint8_t i = 0; i < 4; i++) {
+      nfcid[0][i] = uid[i];
+    }
+    genBcc(nfcid[0]);
+    return 0;
   } else if (uidSize <= 7) {
     // 7 byte uid = Cascade Lv 2
+    nfcid1Size = 1;
 
+    // CL1 part: CT id0 id1 id2 BCC
     nfcid[0][0] = 0x88; // Cascade Tag = 88h
-    memcpy(nfcid[0]+1, uid, 3);
+    for (uint8_t i = 0; i < 3; i++) {
+      nfcid[0][i+1] = uid[i];
+    }
     genBcc(nfcid[0]);
 
-    memcpy(nfcid[1], uid+3, 4);
+    // CL2 part: id3 id4 id5 id6 BCC
+    for (uint8_t i = 0; i < 3; i++) {
+      nfcid[1][i] = uid[i+3];
+    }
     genBcc(nfcid[1]);
-    nfcid1Size = 1;
+    return 1;
   } else if (uidSize <= 10) {
     // 10 byte uid = Cascade Lv 3
+    nfcid1Size = 2;
 
+    // CL1 part: CT id0 id1 id2 BCC
     nfcid[0][0] = 0x88; // Cascade Tag = 88h
-    memcpy(nfcid[0]+1, uid, 3);
+    for (uint8_t i = 0; i < 3; i++) {
+      nfcid[0][i+1] = uid[i];
+    }
     genBcc(nfcid[0]);
 
-    nfcid[1][0] = 0x88; // Cascade Tag = 88h
-    memcpy(nfcid[1]+1, uid+3, 3);
+    // CL2 part: CT id3 id4 id5 BCC
+    nfcid[0][0] = 0x88; // Cascade Tag = 88h
+    for (uint8_t i = 0; i < 3; i++) {
+      nfcid[1][i+1] = uid[i+3];
+    }
     genBcc(nfcid[1]);
 
-    memcpy(nfcid[2], uid+6, 4);
+    // CL3 part: id6 id7 id8 id9 BCC
+    for (uint8_t i = 0; i < 3; i++) {
+      nfcid[2][i] = uid[i+6];
+    }
     genBcc(nfcid[2]);
-    nfcid1Size = 2;
+    return 2;
   } else {
-    // uidSize > 10 bytes not supported
+    // invalid uidSize or uidSize > 10 bytes (not supported)
+    return -1;
   }
 }
 
@@ -459,38 +485,6 @@ void Emulator::txManchester(const uint8_t *buf, uint8_t count) {
   TX_OFF();
 }
 
-typedef enum {
-  ALL_REQ = 0x52,
-  SENS_REQ = 0x26,
-} nfc_short_cmd_t;
-
-typedef struct __packed {
-  nfc_short_cmd_t cmd;
-} nfc_short_frame_t;
-
-typedef enum {
-  NFC_CL1 = 0b0011,
-  NFC_CL2 = 0b0101,
-  NFC_CL3 = 0b0111,
-} collision_level_t;
-
-typedef enum {
-  SDD_REQ = 0b1001,
-} sdd_cmd_t;
-
-typedef struct __packed {
-  collision_level_t col : 4;
-  sdd_cmd_t cmd : 4;
-} nfc_sel_cmd_t;
-
-typedef struct __packed {
-  collision_level_t col : 4;
-  sdd_cmd_t cmd : 4;
-  uint8_t bit_count : 4;
-  uint8_t byte_count : 4;
-} nfc_sdd_frame_t;
-
-
 static uint8_t ATQA[] = {0x44, 0x00};
 static uint8_t SLP_REQ[] = {0x50, 0x00};
 static uint8_t SAK_NC[3] = {0x04, 0xDA, 0x17}; //Select acknowledge uid not complete
@@ -519,6 +513,7 @@ void Emulator::tick() {
   uint8_t attempts = 0xff;
   uint8_t read = 0;
   state = ST_IDLE;
+  debugFlags = 0;
 
   // clk/128 * n ticks timeout
   OCR2A = 0xFF;
@@ -531,6 +526,9 @@ void Emulator::tick() {
     BLU_OFF();
     YEL_OFF();
     
+    if (read) {
+      TCNT2 = 0;
+      TIFR2 |= (1<<OCF2A);
     if (state == ST_IDLE) {
       GRN_ON();
       handleIdle(read);
@@ -545,8 +543,10 @@ void Emulator::tick() {
       handleActive(read);
     } else {
       // invalid state?
-      Serial.print("INVALID STATE!! state="); Serial.print(state, DEC); Serial.print("??????\n");
+      // Serial.print("INVALID STATE!! state="); Serial.print(state, DEC); Serial.print("??????\n");
+      ASSERT(state < ST_MAX);
       break;
+    }
     }
 
     // if (read > 1 && (buffer[0] != 0x50)) Serial.hexdump(buffer, read);
@@ -555,9 +555,15 @@ void Emulator::tick() {
       TCNT2 = 0;
       TIFR2 |= (1<<OCF2A);
     }
-  } while (!(TIFR2 & (1<<OCF2A))); // while timeout not reached
+  } while (!(TIFR2 & (1<<OCF2A)) || state == ST_SLEEP); // while timeout not reached
   TIFR2 |= (1<<OCF2A);
-  // Serial.print("timeout\n");
+
+  if (debugFlags) {
+  Serial.print("Timed out.\n");
+  if (debugFlags & 0b00000001) Serial.print("Got SDD_REQ CL1\n");
+  if (debugFlags & 0b00000010) Serial.print("Got SDD_REQ CL2\n");
+  if (debugFlags & 0b00000100) Serial.print("Got SDD_REQ CL3\n");
+  }
 
   GRN_OFF();
   RED_OFF();
@@ -614,11 +620,11 @@ void Emulator::handleReady(uint8_t bytes) {
   //   return;
   // }
 
-  /*if (bytes == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
+  if (bytes == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
     state = ST_SLEEP;
     // GRN_OFF();
     return;
-  }*/
+  }
 
   // BLU_ON();
 
@@ -631,7 +637,7 @@ void Emulator::handleReady(uint8_t bytes) {
 
   // command nybble must be SDD_REQ
   if (sdd_frame->cmd != SDD_REQ) {
-    // if (bytes > 1) Serial.hexdump(buffer, bytes);
+    Serial.hexdump(buffer, bytes);
     state = ST_IDLE;
     return;
   }
@@ -647,6 +653,7 @@ void Emulator::handleReady(uint8_t bytes) {
     //  when rx SDD_REQ, tx requested nfcid1 collision level
     txManchester(nfcid[col_level], 5);
     // Serial.print("SDD_REQ CL"); Serial.print(col_level, DEC); Serial.print("\n");
+    debugFlags |= (1<<col_level);
   } else if (sdd_frame->byte_count == 0x7) {
     // frame size: 7 bytes == 5 extra bytes: SEL_REQ command
     Serial.print("SEL_REQ CL"); Serial.print(col_level, DEC); Serial.print("\n");
