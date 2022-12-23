@@ -71,6 +71,7 @@ class Emulator {
 public:
   void setup(uint8_t *storage, uint16_t storageSize);
   void tick();
+  void waitForReader();
 
   int8_t setUid(uint8_t *uid, uint8_t uidSize);
 
@@ -89,7 +90,7 @@ public:
   uint8_t nfcid[3][5] = {};
 
   uint8_t buffer[64] = {};
-
+pn532_uart:/dev/ttyUSB0
   uint8_t rxMiller();
   void txManchester(const uint8_t *buf, uint8_t count);
 

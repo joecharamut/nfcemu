@@ -132,7 +132,6 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   TCCR2B = (1<<CS22) | (1<<CS21) | (1<<CS20);
   /* End Timer2 */
 
-
   /* Setup Analog */
   // Port D Bit 6: AIN0, 
   DDRD &= ~(1<<PD6); // input
@@ -143,10 +142,9 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   PORTD &= ~(1<<PD7); // no pullup
 
   // Setup Analog Comparator, Enable (ACD=0), Set Analog Comparator
-  // Interrupt Flag on Rising Output Edge (ACIS0, ACIS1)
-  ACSR = (0<<ACD) | (1<<ACIS0) | (1<<ACIS1);
+  // Interrupt Flag on Falling Edge (ACIS1=1, ACIS0=0)
+  ACSR = (0<<ACD) | (1<<ACIS1) | (0<<ACIS0);
   /* End Analog */
-
 
   GRN_SETUP();
   RED_SETUP();
@@ -265,10 +263,9 @@ uint8_t Emulator::rx() {
   uint8_t timer;
   uint8_t bytePos = 0;
   uint8_t bitPos = 0;
-  uint8_t partialBitPos = 0;
 
-  // setup timer 1 to trip after 2.25 bit durations
-  OCR1A = BC_9QUARTER;
+  // setup timer 1 to trip after 2 bit durations
+  OCR1A = BC_8QUARTER;
   resetTimer1();
 
   // initialize buffer
@@ -286,18 +283,37 @@ uint8_t Emulator::rx() {
   }
   resetRxFlags();
 
-  // GRN_ON();
-
-  uint8_t lastBit = 0;
   do {
+    // interrupt flag set on falling edge
     if (AC_INTERRUPT_SET) {
       timer = TCNT1;
       resetRxFlags();
 
-      // if (bitPos >= 8) {
-      //   bitPos -= 8;
-      //   bytePos++;
-      // }
+      if (timer < BC_2QUARTER) {
+        // falling edge before 0.5bd: 0 bit following 0 with modulation
+        bitPos++;
+      } else if (timer < BC_4QUARTER) {
+        // falling edge after 0.5bd but before 1bd: 1 bit following a 0 or 1
+        buffer[bytePos] |= (1<<bitPos);
+        bitPos++;
+      } else if (timer < BC_6QUARTER) {
+        // falling edge after 1bd but before 1.5bd: 0 bit following a no-modulation 0 (=2 0-bits)
+        bitPos += 2;
+      } else {
+        // falling edge after 1.5bd but before 2bd: 1 bit following a no-modulation 0
+        bitPos++;
+        if (bitPos >= 8) {
+          bitPos -= 8;
+          bytePos++;
+        }
+        buffer[bytePos] |= (1<<bitPos);
+        bitPos++;
+      }
+
+      if (bitPos >= 8) {
+        bitPos -= 8;
+        bytePos++;
+      }
 
       // Serial.print("t="); Serial.print(timer, DEC); Serial.print("\n");
 
@@ -320,36 +336,15 @@ uint8_t Emulator::rx() {
       // 1.25bd < timer < 1.75bd
       // 1.75bd < timer < 2.25bd
       // timer > 2.25bd => end of frame
-
-      partialBitPos += (timer > BC_5QUARTER) + (timer > BC_7QUARTER);
-
-        if (partialBitPos > 17) {
-          bytePos++;
-          partialBitPos -= 18;
-          buffer[bytePos] = 0;
-        }
-       
-        buffer[bytePos] |= RX_MASK[partialBitPos];
-            
-        partialBitPos += 2;
       
       // wait for end of bit period
       // while (!TIMER1_MATCHED);
       
     }
   } while (!TIMER1_MATCHED);
+  // no modulation in ~2bd: end of frame
 
-    // // no modulation in bit duration: pattern Y
-    // if (lastBit) {
-    //   // last bit was 1 / pattern X: valid 0 bit
-    //   lastBit = 0;
-    //   bitPos++;
-    // } else {
-    //   // else: no modulation for 2 bit durations, end of frame
-    //   break;
-    // }
-
-  if (partialBitPos > 7) {
+  if (bitPos > 7) {
     bytePos++;
   }
 
@@ -497,18 +492,26 @@ static const uint8_t SENS_RES[3][2] = {
 };
 
 // comparator interrupt set on rising edge == start of frame condition
-#define START_OF_FRAME (ACSR & (1<<ACI))
+// #define START_OF_FRAME (ACSR & (1<<ACI))
+
+void Emulator::waitForReader() {
+  // setup comparator for falling edge
+  
+}
 
 void Emulator::tick() {
   // big TODO: need to wait after rx-ing data
   // spec says minimum response time for tag->device is 87us
 
-  if (!START_OF_FRAME) {
-    clearAcInterrupt();
+  if (!AC_INTERRUPT_SET) {
+    // clearAcInterrupt();
     return;
   }
+  resetRxFlags();
 
-  disableAin1Pullup();
+  // disableAin1Pullup();
+  // disable pullup on AIN0
+  PORTD &= ~(1<<PD6);
 
   uint8_t attempts = 0xff;
   uint8_t read = 0;
@@ -516,10 +519,11 @@ void Emulator::tick() {
   debugFlags = 0;
 
   // clk/128 * n ticks timeout
-  OCR2A = 0xFF;
+  OCR2A = 0x7F;
+  TCNT2 = 0;
   TIFR2 |= (1<<OCF2A); // clear timer flag
   do {
-    read = rxMiller();
+    read = rx();
 
     GRN_OFF();
     RED_OFF();
@@ -529,24 +533,29 @@ void Emulator::tick() {
     if (read) {
       TCNT2 = 0;
       TIFR2 |= (1<<OCF2A);
-    if (state == ST_IDLE) {
-      GRN_ON();
-      handleIdle(read);
-    } else if (state == ST_SLEEP) {
-      RED_ON();
-      handleSleep(read);
-    } else if (state == ST_READY) {
-      BLU_ON();
-      handleReady(read);
-    } else if (state == ST_ACTIVE) {
-      YEL_ON();
-      handleActive(read);
-    } else {
-      // invalid state?
-      // Serial.print("INVALID STATE!! state="); Serial.print(state, DEC); Serial.print("??????\n");
-      ASSERT(state < ST_MAX);
-      break;
-    }
+      Serial.hexdump(buffer, read);
+
+      if (state == ST_IDLE) {
+        GRN_ON();
+        handleIdle(read);
+      } else if (state == ST_SLEEP) {
+        RED_ON();
+        handleSleep(read);
+      } else if (state == ST_READY) {
+        BLU_ON();
+        handleReady(read);
+      } else if (state == ST_ACTIVE) {
+        YEL_ON();
+        handleActive(read);
+      } else {
+        // invalid state?
+        // Serial.print("INVALID STATE!! state="); Serial.print(state, DEC); Serial.print("??????\n");
+        ASSERT(state < ST_MAX);
+        break;
+      }
+
+      TCNT2 = 0;
+      TIFR2 |= (1<<OCF2A);
     }
 
     // if (read > 1 && (buffer[0] != 0x50)) Serial.hexdump(buffer, read);
@@ -555,7 +564,7 @@ void Emulator::tick() {
       TCNT2 = 0;
       TIFR2 |= (1<<OCF2A);
     }
-  } while (!(TIFR2 & (1<<OCF2A)) || state == ST_SLEEP); // while timeout not reached
+  } while ((TIFR2 & (1<<OCF2A)) == 0); // while timeout not reached
   TIFR2 |= (1<<OCF2A);
 
   if (debugFlags) {
@@ -570,7 +579,9 @@ void Emulator::tick() {
   BLU_OFF();
   YEL_OFF();
 
-  enableAin1Pullup();
+  // enableAin1Pullup();
+  // enable pullup on AIN0
+  PORTD |= (1<<PD6);
 }
 
 void Emulator::handleIdle(uint8_t bytes) {
@@ -591,7 +602,7 @@ void Emulator::handleIdle(uint8_t bytes) {
 void Emulator::handleSleep(uint8_t bytes) {
   /**
    * SLEEP state:
-   *  if recieve ALL_REQ: switch to READY state
+   *  if recieve ALL_REQ: switch to READY statenew_
    *  else: stay in SLEEP state
    **/
 
