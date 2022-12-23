@@ -90,7 +90,6 @@ public:
   uint8_t nfcid[3][5] = {};
 
   uint8_t buffer[64] = {};
-pn532_uart:/dev/ttyUSB0
   uint8_t rxMiller();
   void txManchester(const uint8_t *buf, uint8_t count);
 
