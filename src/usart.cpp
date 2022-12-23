@@ -22,24 +22,23 @@ static const char NUM_ALPHABET[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 USART Serial;
 
 void USART::begin(uint32_t baudrate) {
-    uint32_t ubrr = F_CPU / 16 / baudrate - 1;
+    uint16_t ubrr = (uint16_t)(F_CPU / 16 / baudrate - 1);
 
     // set baud rate
-    UBRR0H = (uint8_t)(ubrr>>8);
-    UBRR0L = (uint8_t)(ubrr);
+    USART0.BAUD = ubrr;
 
     // enable tx only
-    UCSR0B = (1<<TXEN0);
+    USART0.CTRLB |= USART_TXEN_bm;
 
     // set frame format
     // 8 data bits, no parity, 1 stop bit
-    UCSR0C = (1<<UCSZ00) | (1<<UCSZ01);
+    USART0.CTRLC = USART_CHSIZE_8BIT_gc | USART_PMODE_DISABLED_gc | USART_SBMODE_1BIT_gc;
 }
 
 void USART::transmit(uint8_t data) {
     // wait for data register ready
-    while (!(UCSR0A & (1<<UDRE0)));
-    UDR0 = data;
+    while (!(USART0.STATUS & USART_DREIF_bm));
+    USART0.TXDATAL = data;
 }
 
 void USART::print(const char *str) {
