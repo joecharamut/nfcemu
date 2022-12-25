@@ -81,15 +81,15 @@ public:
 
 // private:
   emu_state_t state = ST_IDLE;
-  uint8_t debugFlags = 0;
+  uint8_t debugFlags;
 
-  uint8_t *storage = nullptr;
-  uint16_t storageSize = 0;
+  uint8_t *storage;
+  uint16_t storageSize;
 
-  uint8_t nfcid1Size = 0;
-  uint8_t nfcid[3][5] = {};
+  uint8_t nfcid1Size;
+  uint8_t nfcid[3][5];
 
-  uint8_t buffer[64] = {};
+  uint8_t buffer[64];
   uint8_t rxMiller();
   void txManchester(const uint8_t *buf, uint8_t count);
 
