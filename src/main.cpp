@@ -40,12 +40,6 @@ uint8_t tagUid[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
 
 NfcEmu::Emulator emu;
 
-#define RFID_FREQU 13560000UL
-#define CLC_PBIT (uint16_t)(128.0 * F_CPU / RFID_FREQU + 0.5)
-#define CLCS CLC_PBIT * 5 / 4
-#define CLCM CLC_PBIT * 7 / 4
-#define CLCL CLC_PBIT * 9 / 4
-
 int main() {
   Serial.begin(9600);
   emu.setup(tagStorage, sizeof(tagStorage));
@@ -54,16 +48,7 @@ int main() {
   }
   Serial.print("Hello world\n");
 
-  Serial.print("CLC_PBIT="); Serial.print(CLC_PBIT); Serial.print("\n");
-  Serial.print("CLCS="); Serial.print(CLCS); Serial.print("\n");
-  Serial.print("CLCM="); Serial.print(CLCM); Serial.print("\n");
-  Serial.print("CLCL="); Serial.print(CLCL); Serial.print("\n");
-
-  Serial.hexdump(emu.nfcid[0], 5);
-  Serial.hexdump(emu.nfcid[1], 5);
-  Serial.hexdump(emu.nfcid[2], 5);
-  
   while (1) {
-    emu.tick();
+    emu.waitForReader();
   }
 }

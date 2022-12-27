@@ -79,7 +79,7 @@ public:
   Emulator(Emulator const &) = delete;
   void operator=(Emulator) = delete;
 
-// private:
+private:
   emu_state_t state = ST_IDLE;
   uint8_t debugFlags;
 
@@ -90,10 +90,8 @@ public:
   uint8_t nfcid[3][5];
 
   uint8_t buffer[64];
-  uint8_t rxMiller();
-  void txManchester(const uint8_t *buf, uint8_t count);
-
   uint8_t rx();
+  void tx(const uint8_t *buf, uint8_t count);
 
   void handleIdle(uint8_t bytes);
   void handleReady(uint8_t bytes);
