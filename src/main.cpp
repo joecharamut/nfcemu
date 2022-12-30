@@ -15,9 +15,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ************************************************************************/
 
-#include <avr/common.h>
+#include <stdint.h>
+#include <util/delay.h>
+
 #include "usart.h"
 #include "emulator.h"
+#include "crc.h"
 
 uint8_t tagStorage[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE1, 0x10, 0x80, 0x00, //Byte  0 to 15:
                         0x03, 0xFF, 0x00, 0xB4, 0xC2, 0x09, 0x00, 0x00, 0x00, 0xA5, 0x74, 0x65, 0x78, 0x74, 0x2F, 0x68, //Byte 16 to 31:
@@ -41,13 +44,27 @@ uint8_t tagUid[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
 NfcEmu::Emulator emu;
 
 int main() {
-  Serial.begin(9600);
+  // disable clock prescaler
+  _PROTECTED_WRITE(CLKCTRL.MCLKCTRLB, 0x00);
+
+  Serial.begin();
+
+  uint16_t crc = CRC_A_INITIAL;
+  crc = crc16_iso14443_3_a(crc, 0);
+  crc = crc16_iso14443_3_a(crc, 0);
+  Serial.print(crc, HEX);
+  if (crc == 0x1EA0) {
+    Serial.print("\ncrc works\n");
+  } else {
+    Serial.print("aaaa\n");
+  }
+
   emu.setup(tagStorage, sizeof(tagStorage));
   if (emu.setUid(tagUid, sizeof(tagUid)) < 0) {
     Serial.print("Invalid UID size\n");
   }
   Serial.print("Hello world\n");
-
+  
   while (1) {
     emu.waitForReader();
   }

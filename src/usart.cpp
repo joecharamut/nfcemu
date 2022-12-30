@@ -17,58 +17,71 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "usart.h"
 #include <avr/io.h>
+#include <avr/common.h>
 
 static const char NUM_ALPHABET[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"; 
 USART Serial;
 
-void USART::begin(uint32_t baudrate) {
-    uint16_t ubrr = (uint16_t)(F_CPU / 16 / baudrate - 1);
+#define USART0_BAUD_RATE(BAUD_RATE) ((float)(F_CPU * 64 / (16 * (float)BAUD_RATE)) + 0.5)
 
-    // set baud rate
-    USART0.BAUD = ubrr;
+void USART::begin() {
+  // set PORTB.PIN2 (TXD) as output
+  PORTB.DIRSET |= _BV(PIN2);
+  PORTB.OUTSET |= _BV(PIN2);
+  
+  // set baud rate
+  // static constexpr uint16_t UBRR_VAL = ((64*20000000)/(8*9600));
+  // USART0.BAUDH = UBRR_VAL >> 8;
+  // USART0.BAUDL = UBRR_VAL & 0xFF;
+  USART0.BAUD = USART0_BAUD_RATE(9600);
 
-    // enable tx only
-    USART0.CTRLB |= USART_TXEN_bm;
+  // set frame format
+  // 8 data bits, no parity, 1 stop bit
+  USART0.CTRLC = 
+    USART_CMODE_ASYNCHRONOUS_gc |
+    USART_PMODE_DISABLED_gc |
+    USART_SBMODE_1BIT_gc |
+    USART_CHSIZE_8BIT_gc;
 
-    // set frame format
-    // 8 data bits, no parity, 1 stop bit
-    USART0.CTRLC = USART_CHSIZE_8BIT_gc | USART_PMODE_DISABLED_gc | USART_SBMODE_1BIT_gc;
+  // enable tx mode
+  USART0.CTRLB |= USART_TXEN_bm;
 }
 
-void USART::transmit(uint8_t data) {
-    // wait for data register ready
-    while (!(USART0.STATUS & USART_DREIF_bm));
-    USART0.TXDATAL = data;
+void USART::putchar(uint8_t data) {
+  // wait for data register ready
+  while (!(USART0.STATUS & USART_DREIF_bm));
+  USART0.TXDATAL = data;
 }
 
 void USART::print(const char *str) {
-    while (*str) {
-        transmit(*str++);
-    }
+  while (*str) {
+    putchar(*str++);
+  }
 }
 
-
 void USART::print(uint32_t num, uint8_t base) {
-    uint8_t digits = 0;
+  char buf[16];
+  uint8_t digits = 0;
 
-    do {
-        printBuf[digits] = NUM_ALPHABET[num % base];
-        digits++;
-        if (digits >= sizeof(printBuf)) break;
-        num /= base;
-    } while (num > 0);
+  do {
+    buf[digits] = NUM_ALPHABET[num % base];
+    digits++;
+    if (digits >= sizeof(buf)) break;
+    num /= base;
+  } while (num > 0);
 
-    while (digits) {
-        digits--;
-        transmit(printBuf[digits]);
-    }
+  while (digits) {
+    digits--;
+    putchar(buf[digits]);
+  }
 }
 
 void USART::hexdump(uint8_t *buf, uint8_t sz) {
   print(sz, DEC); print(" bytes:\n");
   for (uint8_t i = 0; i < sz; i++) {
-    print(buf[i], HEX);
-    print(" ");
+    putchar(NUM_ALPHABET[(buf[i] >> 4) & 0xF]);
+    putchar(NUM_ALPHABET[(buf[i] >> 0) & 0xF]);
+    putchar(' ');
   }
-  print("\n");
+  putchar('\n');
 }

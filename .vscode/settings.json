@@ -1,5 +1,6 @@
 {
     "files.associations": {
-        "logging.h": "c"
+        "logging.h": "c",
+        "pgmspace.h": "c"
     }
 }

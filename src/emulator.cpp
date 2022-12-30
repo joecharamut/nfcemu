@@ -29,7 +29,7 @@ using namespace NfcEmu;
 #define STRINGIFY(x) DO_STRINGIFY(x)
 #define DO_STRINGIFY(x) #x
 
-#define DEBUG
+// #define DEBUG
 #ifdef DEBUG
 #define ASSERT(x) do { \
   if (!(x)) { \
@@ -43,15 +43,21 @@ using namespace NfcEmu;
 #define ASSERT(x)
 #endif
 
-#define NFC_CARRIER 13560000L
-#define NFC_SUBCARRIER (NFC_CARRIER/16L)
-#define NFC_BITPERIOD (NFC_CARRIER/128L)
-#define SUBCARRIER_PER ((F_CPU + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER - 1)
-#define SUBCARRIER_CMP ((SUBCARRIER_PER / 2) + 0.5)
-#define BITPERIOD_PER ((F_CPU + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD - 1)
-#define BITPERIOD_1_0 (BITPERIOD_PER * 1.0)
-#define BITPERIOD_1_5 (BITPERIOD_PER * 1.5)
-#define BITPERIOD_2_0 (BITPERIOD_PER * 2.0)
+// general constants
+static constexpr uint32_t NFC_CARRIER = 13560000UL;
+static constexpr uint32_t NFC_SUBCARRIER = NFC_CARRIER / 16UL;
+static constexpr uint32_t NFC_BITPERIOD = NFC_CARRIER / 128UL;
+
+// for TCA0
+static constexpr uint8_t SUBCARRIER_PER = (((F_CPU/2) + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER - 1);
+static constexpr uint8_t SUBCARRIER_CMP = ((SUBCARRIER_PER / 2) + 0.5);
+static constexpr uint8_t BITTIMEOUT_PER = (((F_CPU/2) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD - 1);
+
+// for TCB0
+static constexpr uint16_t BITPERIOD_PER = ((F_CPU + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD - 1);
+static constexpr uint16_t BITPERIOD_1_0 = (BITPERIOD_PER * 1.0);
+static constexpr uint16_t BITPERIOD_1_5 = (BITPERIOD_PER * 1.5);
+static constexpr uint16_t BITPERIOD_2_0 = (BITPERIOD_PER * 2.0);
 
 Emulator::Emulator() {}
 
@@ -97,11 +103,11 @@ static void TCA0_setup() {
   // set duty cycle / compare value
   TCA0.SPLIT.HCMP1 = SUBCARRIER_CMP;
 
-  // setup TCA0 low as a timeout counter
-  TCA0.SPLIT.LPER = BITPERIOD_PER * 2; // 2 bp
+  // setup TCA0 low as a timeout counter 
+  TCA0.SPLIT.LPER = BITTIMEOUT_PER << 1;
 
-  // set divider to CLK/1 and enable
-  TCA0.SPLIT.CTRLA = TCA_SPLIT_CLKSEL_DIV1_gc | TCA_SPLIT_ENABLE_bm;
+  // set divider to CLK/2 and enable
+  TCA0.SPLIT.CTRLA = TCA_SPLIT_CLKSEL_DIV2_gc | TCA_SPLIT_ENABLE_bm;
 }
 
 /**
@@ -117,7 +123,7 @@ static void TCB0_setup() {
   // input capture frequency measurement mode
   TCB0.CTRLB = TCB_CNTMODE_FRQ_gc;
 
-  // set clock source to same as TCA0 and enable
+  // set clock source to peripheral clock and enable
   TCB0.CTRLA = TCB_CLKSEL_CLKTCA_gc | TCB_ENABLE_bm;
 }
 
@@ -202,10 +208,18 @@ static inline void resetRxEdgeTimer() {
 }
 
 #define BIT_TIMEOUT_FLAG (TCA0.SPLIT.INTFLAGS & TCA_SPLIT_LUNF_bm)
-static inline void resetBitTimeout() {
+
+// set timeout duration to bd*(2^n)
+static inline void setBitTimeoutDuration(uint8_t n) {
   // TCA0 is clocked at appx. fc/16 (848KHz),
   // 1 bit-period is fc/128 (106KHz) = 8 counts
-  TCA0.SPLIT.LPER = BITPERIOD_PER * 4; // timeout after 4 bp
+  // bitshift is faster than multiplication, but can only step in *2 multiples
+  TCA0.SPLIT.LPER = (uint8_t) BITTIMEOUT_PER << n;
+}
+
+static inline void resetBitTimeout() {
+  // clear count
+  TCA0.SPLIT.LCNT = TCA0.SPLIT.LPER;
   // clear underflow interrupt
   TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
 }
@@ -234,7 +248,8 @@ uint8_t Emulator::rx() {
   uint8_t bytePos = 0;
   buffer[bytePos] = 0;
 
-  // wait for start of message (TCB0 interrupt)
+  // wait for start of message (TCB0 interrupt) for bd * (2^n)
+  setBitTimeoutDuration(2); // 4 bd timeout (2^2)
   while (!RX_EDGE_FLAG) {
     // if timeout return no data
     if (BIT_TIMEOUT_FLAG) return 0;
@@ -313,17 +328,9 @@ uint8_t Emulator::rx() {
   return bytePos;
 }
 
-#define BIT_TIMEOUT_FLAG (TCA0.SPLIT.INTFLAGS & TCA_SPLIT_LUNF_bm)
-static inline void resetOneBitTimer() {
-  // TCA0 is clocked at appx. fc/16 (848KHz),
-  // 1 bit-period is fc/128 (106KHz) = 8 counts
-  TCA0.SPLIT.LPER = BITPERIOD_PER;
-  // clear underflow interrupt
-  TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
-}
 static inline void waitForOneBit() {
   while (!BIT_TIMEOUT_FLAG);
-  resetOneBitTimer();
+  resetBitTimeout();
 }
 
 // macros to toggle PA4 waveform pin
@@ -351,7 +358,7 @@ void Emulator::tx(const uint8_t *buf, uint8_t count) {
   uint8_t bitPos = 0;
   uint8_t parity = 0;
 
-  resetOneBitTimer();
+  setBitTimeoutDuration(0); // 1 bd timeout (2^0)
   
   // send SOC
   TXBIT(1);
