@@ -1,6 +1,8 @@
 # nfcemu
 
-trying to emulate an ntag215 tag
+temporary name for a nfc tag emulation project
 
-nfcemulator.c/.h from https://github.com/Nonannet/simple-nfc
+ideal goal is emulating an ntag215 compatible tag
+
+inspired by https://github.com/Nonannet/simple-nfc
 
