@@ -27,6 +27,9 @@ public:
   void putchar(uint8_t data);
   void print(const char *str);
   void print(uint32_t num, uint8_t base = DEC);
+  void printHex(uint8_t byte);
+  void printHex(uint16_t word);
+  void printHex(uint32_t dword);
   void hexdump(uint8_t *buf, uint8_t sz);
 };
 

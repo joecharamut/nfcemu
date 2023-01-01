@@ -52,7 +52,7 @@ int main() {
   uint16_t crc = CRC_A_INITIAL;
   crc = crc16_iso14443_3_a(crc, 0);
   crc = crc16_iso14443_3_a(crc, 0);
-  Serial.print(crc, HEX);
+  Serial.printHex(crc);
   if (crc == 0x1EA0) {
     Serial.print("\ncrc works\n");
   } else {

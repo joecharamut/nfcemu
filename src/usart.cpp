@@ -22,6 +22,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 static const char NUM_ALPHABET[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"; 
 USART Serial;
 
+// when they said fractional baud rate i didnt think they literally meant it
+// http://ww1.microchip.com/downloads/en/AppNotes/TB3216-Getting-Started-with-USART-90003216A.pdf
 #define USART0_BAUD_RATE(BAUD_RATE) ((float)(F_CPU * 64 / (16 * (float)BAUD_RATE)) + 0.5)
 
 void USART::begin() {
@@ -30,9 +32,6 @@ void USART::begin() {
   PORTB.OUTSET |= _BV(PIN2);
   
   // set baud rate
-  // static constexpr uint16_t UBRR_VAL = ((64*20000000)/(8*9600));
-  // USART0.BAUDH = UBRR_VAL >> 8;
-  // USART0.BAUDL = UBRR_VAL & 0xFF;
   USART0.BAUD = USART0_BAUD_RATE(9600);
 
   // set frame format
@@ -74,6 +73,29 @@ void USART::print(uint32_t num, uint8_t base) {
     digits--;
     putchar(buf[digits]);
   }
+}
+
+void USART::printHex(uint8_t byte) {
+  putchar(NUM_ALPHABET[(byte >> 4) & 0xF]);
+  putchar(NUM_ALPHABET[(byte >> 0) & 0xF]);
+}
+
+void USART::printHex(uint16_t word) {
+  putchar(NUM_ALPHABET[(word >> 12) & 0xF]);
+  putchar(NUM_ALPHABET[(word >>  8) & 0xF]);
+  putchar(NUM_ALPHABET[(word >>  4) & 0xF]);
+  putchar(NUM_ALPHABET[(word >>  0) & 0xF]);
+}
+
+void USART::printHex(uint32_t dword) {
+  putchar(NUM_ALPHABET[(dword >> 28) & 0xF]);
+  putchar(NUM_ALPHABET[(dword >> 24) & 0xF]);
+  putchar(NUM_ALPHABET[(dword >> 20) & 0xF]);
+  putchar(NUM_ALPHABET[(dword >> 16) & 0xF]);
+  putchar(NUM_ALPHABET[(dword >> 12) & 0xF]);
+  putchar(NUM_ALPHABET[(dword >>  8) & 0xF]);
+  putchar(NUM_ALPHABET[(dword >>  4) & 0xF]);
+  putchar(NUM_ALPHABET[(dword >>  0) & 0xF]);
 }
 
 void USART::hexdump(uint8_t *buf, uint8_t sz) {

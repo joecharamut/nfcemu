@@ -55,34 +55,30 @@ static constexpr uint8_t BITTIMEOUT_PER = (((F_CPU/2) + (NFC_BITPERIOD * 0.5)) /
 
 // for TCB0
 static constexpr uint16_t BITPERIOD_PER = ((F_CPU + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD - 1);
-static constexpr uint16_t BITPERIOD_1_0 = (BITPERIOD_PER * 1.0);
-static constexpr uint16_t BITPERIOD_1_5 = (BITPERIOD_PER * 1.5);
-static constexpr uint16_t BITPERIOD_2_0 = (BITPERIOD_PER * 2.0);
+static constexpr uint16_t BITPERIOD_1_0 = (BITPERIOD_PER * 1.1);
+static constexpr uint16_t BITPERIOD_1_5 = (BITPERIOD_PER * 1.6);
+static constexpr uint16_t BITPERIOD_2_0 = (BITPERIOD_PER * 2.1);
 
 Emulator::Emulator() {}
 
 /**
- * configure analog comparator
+ * Setup analog comparator and connect it to the event system
 */
 static void AC0_setup() {
   // set AINN0 and AINP0 as INPUT
   PORTA.DIRCLR |= _BV(PIN6) | _BV(PIN7);
-  // enable pullup (TODO: needed here or setup hysteresis?)
+  // disable digital input buffer
+  PORTA.PIN6CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+  PORTA.PIN7CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+  // enable pullup (TODO: needed?)
   // PORTA.PIN6CTRL |= PORT_PULLUPEN_bm;
   // PORTA.PIN7CTRL |= PORT_PULLUPEN_bm;
-
-  // enable AC with negative edge interrupt
-  AC0.CTRLA = AC_INTMODE_NEGEDGE_gc | AC_ENABLE_bm;
 
   // set AC as event generator 0
   EVSYS.ASYNCCH0 = EVSYS_ASYNCCH0_AC0_OUT_gc;
 
-#define AC_DEBUG
-#ifdef AC_DEBUG
-  // enable output pin on PA5/PIN3 for debugging
-  PORTA.DIRSET |= _BV(PIN5);
-  AC0.CTRLA |= AC_OUTEN_bm;
-#endif
+  // enable AC
+  AC0.CTRLA = AC_ENABLE_bm | AC_HYSMODE1_bm;
 }
 
 /**
@@ -124,7 +120,7 @@ static void TCB0_setup() {
   TCB0.CTRLB = TCB_CNTMODE_FRQ_gc;
 
   // set clock source to peripheral clock and enable
-  TCB0.CTRLA = TCB_CLKSEL_CLKTCA_gc | TCB_ENABLE_bm;
+  TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
 }
 
 void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
@@ -206,6 +202,9 @@ static inline void resetRxEdgeTimer() {
   // clear flag register
   TCB0.INTFLAGS |= TCB_CAPT_bm;
 }
+static inline void clearRxFlag() {
+  TCB0.INTFLAGS |= TCB_CAPT_bm;
+}
 
 #define BIT_TIMEOUT_FLAG (TCA0.SPLIT.INTFLAGS & TCA_SPLIT_LUNF_bm)
 
@@ -249,56 +248,61 @@ uint8_t Emulator::rx() {
   buffer[bytePos] = 0;
 
   // wait for start of message (TCB0 interrupt) for bd * (2^n)
-  setBitTimeoutDuration(2); // 4 bd timeout (2^2)
+  setBitTimeoutDuration(3); // 4 bd timeout (2^2)
+  resetBitTimeout();
   while (!RX_EDGE_FLAG) {
     // if timeout return no data
     if (BIT_TIMEOUT_FLAG) return 0;
   }
+  setBitTimeoutDuration(1);
 
   // read time between edges (clears interrupt flag)
   uint16_t edgeDelta = RX_EDGE_TIME;
+  resetRxEdgeTimer();
 
   // start of message is always 0 bit
   uint8_t bitPos = 1;
   uint8_t prevBit = 0;
 
+  #define ALMOST_EQUAL(x, y) (((x) >= ((y) * 0.9)) || ((x) <= ((y) * 1.1)))
   do {
     // on next edge...
     if (RX_EDGE_FLAG) {
       // read delta
       edgeDelta = RX_EDGE_TIME;
+      // Serial.printHex(edgeDelta); Serial.putchar('\n');
       resetBitTimeout();
+      resetRxEdgeTimer();
 
       // interpret resulting bit time
       // should always be {1.0, 1.5, 2.0}bp
       if (prevBit == 0) {
         // space->???
-        if (edgeDelta == BITPERIOD_1_0) {
+        if (edgeDelta <= BITPERIOD_1_0) {
           // 1.0 time between bits = space
           bitPos++;
-        } else if (edgeDelta == BITPERIOD_1_5) {
+          prevBit = 0;
+        } else if (edgeDelta <= BITPERIOD_1_5) {
           // 1.5 time = mark
           buffer[bytePos] |= (1<<bitPos);
-          prevBit = 1;
           bitPos++;
-        } else if (edgeDelta >= BITPERIOD_2_0) {
-          // idle symbol (end of message)
-          break;
+          prevBit = 1;
         } else {
-          // delta < 1.0 == invalid?
+          // delta > 2.0 = idle symbol (end of message)
           break;
         }
       } else {
         // mark->???
-        if (edgeDelta == BITPERIOD_1_0) {
+        if (edgeDelta <= BITPERIOD_1_0) {
           // 1.0 time = mark
           buffer[bytePos] |= (1<<bitPos);
-          prevBit = 1;
           bitPos++;
-        } else if (edgeDelta == BITPERIOD_1_5) {
+          prevBit = 1;
+        } else if (edgeDelta <= BITPERIOD_1_5) {
           // 1.5 time = 2 spaces
           bitPos += 2;
-        } else if (edgeDelta == BITPERIOD_2_0) {
+          prevBit = 0;
+        } else if (edgeDelta <= BITPERIOD_2_0) {
           // 2.0 time = space, mark
           bitPos += 2;
           if (bitPos >= 8) {
@@ -306,10 +310,11 @@ uint8_t Emulator::rx() {
             bytePos++;
           }
           buffer[bytePos] |= (1<<bitPos);
-          prevBit = 1;
           bitPos++;
+          prevBit = 1;
         } else {
           // delta < 1.0 || delta > 2.0  == invalid?
+          Serial.print("delta error\n");
           break;
         }
       }
@@ -325,6 +330,8 @@ uint8_t Emulator::rx() {
   if (bitPos >= 7) {
     bytePos++;
   }
+
+  // Serial.print("got "); Serial.print(bytePos); Serial.print(" bytes, "); Serial.print(bitPos); Serial.print(" bits\n");
   return bytePos;
 }
 
@@ -372,6 +379,7 @@ void Emulator::tx(const uint8_t *buf, uint8_t count) {
       // 0 bit
       TXBIT(0);
     }
+    bitPos++;
 
     if (bitPos > 7) {
       if (parity) {
@@ -391,10 +399,13 @@ void Emulator::tx(const uint8_t *buf, uint8_t count) {
   TX_OFF();
 }
 
-static uint8_t ATQA[] = {0x44, 0x00};
-static uint8_t SLP_REQ[] = {0x50, 0x00};
-static uint8_t SAK_NC[3] = {0x04, 0xDA, 0x17}; //Select acknowledge uid not complete
-static uint8_t SAK_C[3] = {0x00, 0xFE, 0x51}; //Select acknowledge uid complete, Type 2 (PICC not compliant to ISO/IEC 14443-4)
+static const uint8_t ALL_REQ = 0x52;
+static const uint8_t SENS_REQ = 0x26;
+
+static const uint8_t ATQA[] = {0x44, 0x00};
+static const uint8_t SLP_REQ[] = {0x50, 0x00};
+static const uint8_t SAK_NC[3] = {0x04, 0xDA, 0x17}; //Select acknowledge uid not complete
+static const uint8_t SAK_C[3] = {0x00, 0xFE, 0x51}; //Select acknowledge uid complete, Type 2 (PICC not compliant to ISO/IEC 14443-4)
 
 static const uint8_t SENS_RES[3][2] = {
   { 0b00000100, 0b00000000 }, // SEL_RES CL1 ( 4 UID bytes)
@@ -408,7 +419,12 @@ void Emulator::waitForReader() {
     read = rx();
 
     if (read) {
-
+      // Serial.hexdump(buffer, read);
+      if (read == 1 && (buffer[0] == SENS_REQ || buffer[0] == ALL_REQ)) {
+        tx(SENS_RES[nfcid1Size], 2);
+      } else if (read > 1) {
+        Serial.hexdump(buffer, read);
+      }
     }
   } while (0);
 }
