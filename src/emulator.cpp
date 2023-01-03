@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <util/delay.h>
 #include <string.h>
+#include <avr/interrupt.h>
 
 using namespace NfcEmu;
 
@@ -221,6 +222,73 @@ static inline void resetBitTimeout() {
   TCA0.SPLIT.LCNT = TCA0.SPLIT.LPER;
   // clear underflow interrupt
   TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
+}
+
+static volatile uint8_t rxBitMask;
+static volatile uint8_t rxBytePos;
+static volatile uint8_t rxLastBit;
+static volatile uint8_t rxBuffer[64];
+
+// rotate bitmask by 1 bit and increment bytepos if necessary
+#define NEXT_BIT() do { asm volatile (  \
+  "clc        ; clear carry flag  \n\t" \
+  "rol %0     ; rotate left       \n\t" \
+  "brcc 1f    ; if carry set:     \n\t" \
+  "  rol %0   ;   rotate left     \n\t" \
+  "  inc %1   ;   inc byte pos    \n\t" \
+  "1: nop     ; nop (branch dest) \n\t" \
+  : "+r" (rxBitMask), "=r" (rxBytePos)  \
+  : /* no input operands */             \
+); } while (0)
+
+ISR(TCB0_INT_vect) {
+  // bitmask doubling as enable condition
+  if (!rxBitMask) return;
+
+  uint16_t delta = TCB0.CCMP;
+  if (rxLastBit == 0) {
+    // space->???
+    if (delta <= BITPERIOD_1_0) {
+      // 1.0 time between bits = space
+      NEXT_BIT();
+    } else if (delta <= BITPERIOD_1_5) {
+      // 1.5 time = mark
+      rxBuffer[rxBytePos] |= rxBitMask;
+      NEXT_BIT();
+      rxLastBit = 1;
+    } else {
+      // delta > 2.0 = idle symbol (end of message)
+      NEXT_BIT();
+      NEXT_BIT();
+      rxBitMask = 0;
+      rxLastBit = 0;
+      return;
+    }
+  } else {
+    // mark->???
+    if (delta <= BITPERIOD_1_0) {
+      // 1.0 time = mark
+      rxBuffer[rxBytePos] |= rxBitMask;
+      NEXT_BIT();
+    } else if (delta <= BITPERIOD_1_5) {
+      // 1.5 time = 2 spaces
+      NEXT_BIT();
+      NEXT_BIT();
+      rxLastBit = 0;
+    } else if (delta <= BITPERIOD_2_0) {
+      // 2.0 time = space, mark
+      NEXT_BIT();
+      rxBuffer[rxBytePos] |= rxBitMask;
+      NEXT_BIT();
+    } else {
+      // delta < 1.0 || delta > 2.0  == invalid?
+      NEXT_BIT();
+      NEXT_BIT();
+      rxBitMask = 0;
+      rxLastBit = 0;
+      return;
+    }
+  }
 }
 
 /**
