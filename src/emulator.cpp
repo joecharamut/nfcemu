@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "emulator.h"
 #include "usart.h"
+#include "nfc/funcs.h"
 
 #include <util/delay.h>
 #include <string.h>
@@ -143,66 +144,9 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   PORTA.DIRSET = _BV(PIN1);
 }
 
-static void genBcc(uint8_t *buf) {
-  //add exclusive-OR of 4 bytes
-  buf[4] = buf[0] ^ buf[1] ^ buf[2] ^ buf[3];
-}
-
-int8_t Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
-  if (uidSize <= 4) {
-    // 4 byte uid = Cascade Lv 1
-    nfcid1Size = 0;
-    
-    for (uint8_t i = 0; i < 4; i++) {
-      nfcid[0][i] = uid[i];
-    }
-    genBcc(nfcid[0]);
-    return 0;
-  } else if (uidSize <= 7) {
-    // 7 byte uid = Cascade Lv 2
-    nfcid1Size = 1;
-
-    // CL1 part: CT id0 id1 id2 BCC
-    nfcid[0][0] = 0x88; // Cascade Tag = 88h
-    for (uint8_t i = 0; i < 3; i++) {
-      nfcid[0][i+1] = uid[i];
-    }
-    genBcc(nfcid[0]);
-
-    // CL2 part: id3 id4 id5 id6 BCC
-    for (uint8_t i = 0; i < 3; i++) {
-      nfcid[1][i] = uid[i+3];
-    }
-    genBcc(nfcid[1]);
-    return 1;
-  } else if (uidSize <= 10) {
-    // 10 byte uid = Cascade Lv 3
-    nfcid1Size = 2;
-
-    // CL1 part: CT id0 id1 id2 BCC
-    nfcid[0][0] = 0x88; // Cascade Tag = 88h
-    for (uint8_t i = 0; i < 3; i++) {
-      nfcid[0][i+1] = uid[i];
-    }
-    genBcc(nfcid[0]);
-
-    // CL2 part: CT id3 id4 id5 BCC
-    nfcid[0][0] = 0x88; // Cascade Tag = 88h
-    for (uint8_t i = 0; i < 3; i++) {
-      nfcid[1][i+1] = uid[i+3];
-    }
-    genBcc(nfcid[1]);
-
-    // CL3 part: id6 id7 id8 id9 BCC
-    for (uint8_t i = 0; i < 3; i++) {
-      nfcid[2][i] = uid[i+6];
-    }
-    genBcc(nfcid[2]);
-    return 2;
-  } else {
-    // invalid uidSize or uidSize > 10 bytes (not supported)
-    return -1;
-  }
+void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
+  this->uid = uid;
+  this->uidSize = uidSize;
 }
 
 #define RX_EDGE_FLAG (TCB0.INTFLAGS & TCB_CAPT_bm)
@@ -269,6 +213,9 @@ uint8_t Emulator::rx() {
       /* parity bit */                  \
       bitPos = 0;                       \
       bytePos++;                        \
+      if (bitPos >= sizeof(buffer)) {   \
+        return bytePos;                 \
+      }                                 \
       buffer[bytePos] = 0;              \
     } else {                            \
       buffer[bytePos] |= ((b)<<bitPos); \
@@ -429,16 +376,25 @@ void Emulator::waitForReader() {
     if (read) {
       // Serial.hexdump(buffer, read);
       if (read == 1 && (buffer[0] == SENS_REQ || buffer[0] == ALL_REQ)) {
-        tx(SENS_RES[nfcid1Size], 2);
+        if (uidSize == 4) {
+          tx(SENS_RES[0], 2);
+        } else if (uidSize == 7) {
+          tx(SENS_RES[1], 2);
+        } else if (uidSize == 10) {
+          tx(SENS_RES[2], 2);
+        }
         // PORTA.OUTSET = _BV(PIN5);
       } else if (read == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
         // do nothing
       } else if (read == 2 && buffer[0] == SDD_REQ_CL1) {
-        tx(nfcid[0], 5);
+        NfcA::genSddResponse(uid, uidSize, 0, buffer);
+        tx(buffer, 5);
       } else if (read == 2 && buffer[0] == SDD_REQ_CL2) {
-        tx(nfcid[1], 5);
+        NfcA::genSddResponse(uid, uidSize, 1, buffer);
+        tx(buffer, 5);
       } else if (read == 2 && buffer[0] == SDD_REQ_CL3) {
-        tx(nfcid[2], 5);
+        NfcA::genSddResponse(uid, uidSize, 2, buffer);
+        tx(buffer, 5);
       } else {
         Serial.hexdump(buffer, read);
       }

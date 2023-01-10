@@ -61,9 +61,7 @@ int main() {
   }*/
 
   emu.setup(tagStorage, sizeof(tagStorage));
-  if (emu.setUid(tagUid, sizeof(tagUid)) < 0) {
-    Serial.print("Invalid UID size\n");
-  }
+  emu.setUid(tagUid, sizeof(tagUid));
   Serial.print("Hello world\n");
   
   while (1) {

@@ -35,45 +35,12 @@ enum ST_ENUM {
 };
 typedef uint8_t emu_state_t;
 
-typedef enum {
-  ALL_REQ = 0x52,
-  SENS_REQ = 0x26,
-} nfc_short_cmd_t;
-
-typedef struct __packed {
-  nfc_short_cmd_t cmd;
-} nfc_short_frame_t;
-
-typedef enum {
-  NFC_CL1 = 0b0011,
-  NFC_CL2 = 0b0101,
-  NFC_CL3 = 0b0111,
-} collision_level_t;
-
-typedef enum {
-  SDD_REQ = 0b1001,
-} sdd_cmd_t;
-
-typedef struct __packed {
-  collision_level_t col : 4;
-  sdd_cmd_t cmd : 4;
-} nfc_sel_cmd_t;
-
-typedef struct __packed {
-  collision_level_t col : 4;
-  sdd_cmd_t cmd : 4;
-  uint8_t bit_count : 4;
-  uint8_t byte_count : 4;
-} nfc_sdd_frame_t;
-
-
 class Emulator {
 public:
   void setup(uint8_t *storage, uint16_t storageSize);
-  void tick();
   void waitForReader();
 
-  int8_t setUid(uint8_t *uid, uint8_t uidSize);
+  void setUid(uint8_t *uid, uint8_t uidSize);
 
   explicit Emulator();
   Emulator(Emulator const &) = delete;
@@ -84,13 +51,12 @@ public:
 
 private:
   emu_state_t state = ST_IDLE;
-  uint8_t debugFlags;
 
   uint8_t *storage;
   uint16_t storageSize;
 
-  uint8_t nfcid1Size;
-  uint8_t nfcid[3][5];
+  uint8_t *uid;
+  uint8_t uidSize;
 
   uint8_t buffer[64];
 };
