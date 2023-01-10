@@ -45,7 +45,6 @@ namespace NfcA {
   int8_t genSddResponse(const uint8_t *uid, uint8_t uidSize, uint8_t collisionLevel, uint8_t *outputBuf);
 
   uint16_t crc16A_update(uint16_t crc, uint8_t data);
-  
   uint16_t calcCrc16A(uint8_t *buf, uint8_t len);
   void appendCrc16A(uint8_t *buf, uint8_t len);
 };

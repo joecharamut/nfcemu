@@ -53,3 +53,9 @@ uint16_t NfcA::calcCrc16A(uint8_t *buf, uint8_t len) {
   return crc;
 }
 
+void NfcA::appendCrc16A(uint8_t *buf, uint8_t len) {
+  uint16_t crc = calcCrc16A(buf, len);
+  buf[len] = crc & 0xFF;
+  buf[len+1] = (crc >> 8) & 0xFF;
+}
+
