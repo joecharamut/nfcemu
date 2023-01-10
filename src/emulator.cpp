@@ -361,9 +361,9 @@ void Emulator::tx(const uint8_t *buf, uint8_t count) {
   uint8_t parity = 0;
 
   // TODO: wait correct delay before transmit
-  TCA0.SPLIT.LPER = 0xFF;
+  // TCA0.SPLIT.LPER = 0xFF;
   resetBitTimeout();
-  waitForOneBit();
+  // waitForOneBit();
   
   PORTA.OUTSET = _BV(PIN1);
   setBitTimeoutDuration(0); // 1 bd timeout (2^0)
@@ -411,6 +411,10 @@ static const uint8_t SLP_REQ[] = {0x50, 0x00};
 static const uint8_t SAK_NC[3] = {0x04, 0xDA, 0x17}; //Select acknowledge uid not complete
 static const uint8_t SAK_C[3] = {0x00, 0xFE, 0x51}; //Select acknowledge uid complete, Type 2 (PICC not compliant to ISO/IEC 14443-4)
 
+static const uint8_t SDD_REQ_CL1 = 0x93;
+static const uint8_t SDD_REQ_CL2 = 0x95;
+static const uint8_t SDD_REQ_CL3 = 0x97;
+
 static const uint8_t SENS_RES[3][2] = {
   { 0b00000100, 0b00000000 }, // SEL_RES CL1 ( 4 UID bytes)
   { 0b01000100, 0b00000000 }, // SEL_RES CL2 ( 7 UID bytes)
@@ -429,6 +433,12 @@ void Emulator::waitForReader() {
         // PORTA.OUTSET = _BV(PIN5);
       } else if (read == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
         // do nothing
+      } else if (read == 2 && buffer[0] == SDD_REQ_CL1) {
+        tx(nfcid[0], 5);
+      } else if (read == 2 && buffer[0] == SDD_REQ_CL2) {
+        tx(nfcid[1], 5);
+      } else if (read == 2 && buffer[0] == SDD_REQ_CL3) {
+        tx(nfcid[2], 5);
       } else {
         Serial.hexdump(buffer, read);
       }
