@@ -78,8 +78,16 @@ static void AC0_setup() {
   // set AC as event generator 0
   EVSYS.ASYNCCH0 = EVSYS_ASYNCCH0_AC0_OUT_gc;
 
+  #define AC_DEBUG
+  #ifdef AC_DEBUG
+  // set PA5 as OUTPUT
+  PORTA.DIRSET = _BV(PIN5);
+  // enable comparator output
+  AC0.CTRLA |= AC_OUTEN_bm;
+  #endif
+
   // enable AC
-  AC0.CTRLA = AC_ENABLE_bm | AC_HYSMODE1_bm | AC_OUTEN_bm;
+  AC0.CTRLA |= AC_ENABLE_bm | AC_HYSMODE1_bm;
 }
 
 /**
@@ -132,7 +140,7 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   TCA0_setup();
   TCB0_setup();
 
-  PORTA.DIRSET = _BV(PIN1) | _BV(PIN5);
+  PORTA.DIRSET = _BV(PIN1);
 }
 
 static void genBcc(uint8_t *buf) {
@@ -199,15 +207,6 @@ int8_t Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
 
 #define RX_EDGE_FLAG (TCB0.INTFLAGS & TCB_CAPT_bm)
 #define RX_EDGE_TIME (TCB0.CCMP)
-static inline void resetRxEdgeTimer() {
-  // clear counter
-  TCB0.CNT = 0;
-  // clear flag register
-  TCB0.INTFLAGS |= TCB_CAPT_bm;
-}
-static inline void clearRxFlag() {
-  TCB0.INTFLAGS |= TCB_CAPT_bm;
-}
 
 #define BIT_TIMEOUT_FLAG (TCA0.SPLIT.INTFLAGS & TCA_SPLIT_LUNF_bm)
 
@@ -245,30 +244,6 @@ static inline void resetBitTimeout() {
  * Protocol info referenced from https://github.com/sigrokproject/libsigrokdecode/blob/master/decoders/miller/pd.py
 */
 uint8_t Emulator::rx() {
-  #define EMIT_0() do {     \
-    if (bitPos == 8) {      \
-      /* parity bit */      \
-      bitPos = 0;           \
-      bytePos++;            \
-      buffer[bytePos] = 0;  \
-    } else {                \
-      bitPos++;             \
-    }                       \
-  } while (0)
-
-  #define EMIT_1() do {               \
-    if (bitPos == 8) {                \
-      /* parity bit */                \
-      bitPos = 0;                     \
-      bytePos++;                      \
-      buffer[bytePos] = 0;            \
-    } else {                          \
-      buffer[bytePos] |= (1<<bitPos); \
-      bitPos++;                       \
-    }                                 \
-  } while (0)
-  
-
   // wait for start of message (TCB0 interrupt) for bd * (2^n)
   setBitTimeoutDuration(3);
   resetBitTimeout();
@@ -289,6 +264,18 @@ uint8_t Emulator::rx() {
   uint8_t lastBit = 0;
   buffer[0] = 0;
 
+  #define BIT(b) do {                   \
+    if (bitPos == 8) {                  \
+      /* parity bit */                  \
+      bitPos = 0;                       \
+      bytePos++;                        \
+      buffer[bytePos] = 0;              \
+    } else {                            \
+      buffer[bytePos] |= ((b)<<bitPos); \
+      bitPos++;                         \
+    }                                   \
+  } while (0)
+
   do {
     if (RX_EDGE_FLAG) {
       delta = TCB0.CCMP;
@@ -297,36 +284,36 @@ uint8_t Emulator::rx() {
         // space->???
         if (delta <= BITPERIOD_1_0) {
           // 1.0 time between bits = space
-          EMIT_0();
+          BIT(0);
         } else if (delta <= BITPERIOD_1_5) {
           // 1.5 time = mark
-          EMIT_1();
+          BIT(1);
           lastBit = 1;
         } else {
           // delta > 2.0 = idle symbol (end of message)
           // Serial.print("idle EOM break\n");
-          EMIT_0();
-          EMIT_0();
+          BIT(0);
+          BIT(0);
           break;
         }
       } else {
         // mark->???
         if (delta <= BITPERIOD_1_0) {
           // 1.0 time = mark
-          EMIT_1();
+          BIT(1);
         } else if (delta <= BITPERIOD_1_5) {
           // 1.5 time = 2 spaces
-          EMIT_0();
-          EMIT_0();
+          BIT(0);
+          BIT(0);
           lastBit = 0;
         } else if (delta <= BITPERIOD_2_0) {
           // 2.0 time = space, mark
-          EMIT_0();
-          EMIT_1();
+          BIT(0);
+          BIT(1);
         } else {
           // delta < 1.0 || delta > 2.0  == invalid?
-          EMIT_0();
-          EMIT_0();
+          BIT(0);
+          BIT(0);
           break;
         }
       }
@@ -373,7 +360,7 @@ void Emulator::tx(const uint8_t *buf, uint8_t count) {
   uint8_t bitPos = 0;
   uint8_t parity = 0;
 
-  // delay 8 bd before txing reply
+  // TODO: wait correct delay before transmit
   TCA0.SPLIT.LPER = 0xFF;
   resetBitTimeout();
   waitForOneBit();
