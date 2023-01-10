@@ -14,11 +14,11 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ***********************************************************************/
-#include "crc.h"
+#include "funcs.h"
 
 // lookup table generated with http://www.sunshine2k.de/coding/javascript/crc/crc_js.html
 // settings: CRC-16, Predefined[CRC16_A], Show reflected lookup table
-static const uint16_t CRC_TABLE[256] = {
+static const uint16_t CRC_A_TABLE[256] = {
   0x0000, 0x1189, 0x2312, 0x329B, 0x4624, 0x57AD, 0x6536, 0x74BF, 0x8C48, 0x9DC1, 0xAF5A, 0xBED3, 0xCA6C, 0xDBE5, 0xE97E, 0xF8F7,
   0x1081, 0x0108, 0x3393, 0x221A, 0x56A5, 0x472C, 0x75B7, 0x643E, 0x9CC9, 0x8D40, 0xBFDB, 0xAE52, 0xDAED, 0xCB64, 0xF9FF, 0xE876,
   0x2102, 0x308B, 0x0210, 0x1399, 0x6726, 0x76AF, 0x4434, 0x55BD, 0xAD4A, 0xBCC3, 0x8E58, 0x9FD1, 0xEB6E, 0xFAE7, 0xC87C, 0xD9F5,
@@ -37,34 +37,19 @@ static const uint16_t CRC_TABLE[256] = {
   0xF78F, 0xE606, 0xD49D, 0xC514, 0xB1AB, 0xA022, 0x92B9, 0x8330, 0x7BC7, 0x6A4E, 0x58D5, 0x495C, 0x3DE3, 0x2C6A, 0x1EF1, 0x0F78,
 };
 
-uint16_t crc16_iso14443_3_a(uint16_t crc, uint8_t byte) {
-  return (crc >> 8) ^ CRC_TABLE[(crc ^ byte) & 0xFF];
+const uint16_t CRC_A_INITIAL = 0x6363;
+
+uint16_t NfcA::crc16A_update(uint16_t crc, uint8_t data) {
+  return (crc >> 8) ^ CRC_A_TABLE[(crc ^ data) & 0xFF];
 }
 
-#ifdef CRC_TEST_HOST
-#include <stdio.h>
-#include <assert.h>
-void main() {
-  uint16_t crc;
-
-  crc = CRC_A_INITIAL;
-  crc = crc16_iso14443_3_a(crc, 0x00);
-  crc = crc16_iso14443_3_a(crc, 0x00);
-  printf("crc16([0x00, 0x00]) = 0x%04x (expected: 0x1EA0)\n", crc);
-  assert(crc == 0x1EA0);
-
-  crc = CRC_A_INITIAL;
-  crc = crc16_iso14443_3_a(crc, 0x12);
-  crc = crc16_iso14443_3_a(crc, 0x34);
-  printf("crc16([0x12, 0x34]) = 0x%04x (expected: 0xCF26)\n", crc);
-  assert(crc == 0xCF26);
-
-  crc = CRC_A_INITIAL;
-  crc = crc16_iso14443_3_a(crc, 0x50);
-  crc = crc16_iso14443_3_a(crc, 0x00);
-  printf("crc16([0x50, 0x00]) = 0x%04x (expected: 0xCD57)\n", crc);
-  assert(crc == 0xCD57);
-
-  printf("crc tests pass\n");
+uint16_t NfcA::calcCrc16A(uint8_t *buf, uint8_t len) {
+  uint16_t crc = CRC_A_INITIAL;
+  while (len) {
+    crc = crc16A_update(crc, *buf);
+    buf++;
+    len--;
+  }
+  return crc;
 }
-#endif
+
