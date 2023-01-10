@@ -37,16 +37,14 @@ static const uint16_t CRC_A_TABLE[256] = {
   0xF78F, 0xE606, 0xD49D, 0xC514, 0xB1AB, 0xA022, 0x92B9, 0x8330, 0x7BC7, 0x6A4E, 0x58D5, 0x495C, 0x3DE3, 0x2C6A, 0x1EF1, 0x0F78,
 };
 
-const uint16_t CRC_A_INITIAL = 0x6363;
-
-uint16_t NfcA::crc16A_update(uint16_t crc, uint8_t data) {
+uint16_t NfcA::updateCrc16A(uint16_t crc, uint8_t data) {
   return (crc >> 8) ^ CRC_A_TABLE[(crc ^ data) & 0xFF];
 }
 
 uint16_t NfcA::calcCrc16A(uint8_t *buf, uint8_t len) {
   uint16_t crc = CRC_A_INITIAL;
   while (len) {
-    crc = crc16A_update(crc, *buf);
+    crc = updateCrc16A(crc, *buf);
     buf++;
     len--;
   }

@@ -44,7 +44,23 @@ namespace NfcA {
   */
   int8_t genSddResponse(const uint8_t *uid, uint8_t uidSize, uint8_t collisionLevel, uint8_t *outputBuf);
 
-  uint16_t crc16A_update(uint16_t crc, uint8_t data);
+  /// @brief Initial value for CRC_A calculations
+  const uint16_t CRC_A_INITIAL = 0x6363;
+
+  /// @brief Update a CRC_A signature with a byte of data
+  /// @param crc the crc value to update
+  /// @param data the byte of data
+  /// @return new crc value
+  uint16_t updateCrc16A(uint16_t crc, uint8_t data);
+
+  /// @brief Calculate the CRC_A value of an entire block of data
+  /// @param buf data buffer
+  /// @param len length of data
+  /// @return the crc value
   uint16_t calcCrc16A(uint8_t *buf, uint8_t len);
+
+  /// @brief Calculate and append the CRC_A value to a block of data
+  /// @param buf data buffer
+  /// @param len length of data
   void appendCrc16A(uint8_t *buf, uint8_t len);
 };
