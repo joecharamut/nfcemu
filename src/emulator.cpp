@@ -25,26 +25,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using namespace NfcEmu;
 
-// #define force_inline inline __attribute__((always_inline))
-#define force_inline 
-
-#define STRINGIFY(x) DO_STRINGIFY(x)
-#define DO_STRINGIFY(x) #x
-
-// #define DEBUG
-#ifdef DEBUG
-#define ASSERT(x) do { \
-  if (!(x)) { \
-    Serial.print("ASSERTION FAILED: (" #x ") in func "); \
-    Serial.print(__PRETTY_FUNCTION__); \
-    Serial.print(", line " STRINGIFY(__LINE__) "\n"); \
-    while (1); \
-  } \
-} while (0)
-#else
-#define ASSERT(x)
-#endif
-
 // general constants
 static constexpr uint32_t NFC_CARRIER = 13560000UL;
 static constexpr uint32_t NFC_SUBCARRIER = NFC_CARRIER / 16UL;
@@ -172,9 +152,9 @@ static inline void resetBitTimeout() {
 }
 
 /**
- * Decode modified miller encoding of the demodulated signal
+ * @short Decode modified miller encoding of the demodulated signal
  * 
- * "mark" = '1' bit
+ * @details "mark" = '1' bit
  * a mark will always be encoded as having an edge in the middle of the bit period
  * 
  * "space" = '0' bit
@@ -185,7 +165,9 @@ static inline void resetBitTimeout() {
  * Start of message/frame: space with edge
  * End of message/frame: space followed by idle period
  * 
- * Protocol info referenced from https://github.com/sigrokproject/libsigrokdecode/blob/master/decoders/miller/pd.py
+ * @return number of bytes successfully received
+ * 
+ * @ref Protocol info referenced from https://github.com/sigrokproject/libsigrokdecode/blob/master/decoders/miller/pd.py
 */
 uint8_t Emulator::rx() {
   // wait for start of message (TCB0 interrupt) for bd * (2^n)
@@ -197,17 +179,17 @@ uint8_t Emulator::rx() {
   }
 
   // set timeout to 4 bd
-  // TCA0.SPLIT.LPER = 0xff;
   setBitTimeoutDuration(1);
   resetBitTimeout();
 
-  uint16_t delta = TCB0.CCMP;
-
+  uint16_t delta = RX_EDGE_TIME;
   uint8_t bitPos = 0;
   uint8_t bytePos = 0;
   uint8_t lastBit = 0;
   buffer[0] = 0;
 
+  // macro to handle checking whether it's the next byte, 
+  //  skipping the parity bit, and writing in the data
   #define BIT(b) do {                   \
     if (bitPos == 8) {                  \
       /* parity bit */                  \
@@ -225,7 +207,7 @@ uint8_t Emulator::rx() {
 
   do {
     if (RX_EDGE_FLAG) {
-      delta = TCB0.CCMP;
+      delta = RX_EDGE_TIME;
 
       if (lastBit == 0) {
         // space->???
@@ -238,7 +220,6 @@ uint8_t Emulator::rx() {
           lastBit = 1;
         } else {
           // delta > 2.0 = idle symbol (end of message)
-          // Serial.print("idle EOM break\n");
           BIT(0);
           BIT(0);
           break;
@@ -269,6 +250,7 @@ uint8_t Emulator::rx() {
     }
   } while (!BIT_TIMEOUT_FLAG);
   
+  // 7 bit frames are valid short frames, so round up to a byte
   if (bitPos >= 7) {
     bytePos++;
   }
@@ -278,14 +260,16 @@ uint8_t Emulator::rx() {
 
 static inline void waitForOneBit() {
   while (!BIT_TIMEOUT_FLAG);
-  // resetBitTimeout();
   TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
 }
 
-// macros to toggle PA4 waveform pin
+// enable waveform output on PA4
 #define TX_ON() do { PORTA.DIRSET = _BV(PIN4); } while (0)
+// disable waveform output on PA4
 #define TX_OFF() do { PORTA.DIRCLR = _BV(PIN4); } while (0)
 
+// TODO: should waitForOneBit really be waiting for half a bit??
+// transmit a '1' (modulation for 1/2 bd, no modulation 1/2 bd)
 #define TX_1() do { \
   TX_ON(); \
   waitForOneBit(); \
@@ -293,14 +277,13 @@ static inline void waitForOneBit() {
   waitForOneBit(); \
 } while (0)
 
+// transmit a '0' (no modulation for 1/2 bd, modulation 1/2 bd)
 #define TX_0() do { \
   TX_OFF(); \
   waitForOneBit(); \
   TX_ON(); \
   waitForOneBit(); \
 } while (0)
-
-#define TXBIT(x) TX_##x()
 
 void Emulator::tx(const uint8_t *buf, uint8_t count) {
   uint8_t bytePos = 0;
@@ -317,24 +300,24 @@ void Emulator::tx(const uint8_t *buf, uint8_t count) {
   waitForOneBit();
   
   // send SOC
-  TXBIT(1);
+  TX_1();
 
   do {
     if (buf[bytePos] & (1<<bitPos)) {
       // 1 bit
-      TXBIT(1);
+      TX_1();
       parity ^= 1;
     } else {
       // 0 bit
-      TXBIT(0);
+      TX_0();
     }
     bitPos++;
 
     if (bitPos > 7) {
       if (parity) {
-        TXBIT(0);
+        TX_0();
       } else {
-        TXBIT(1);
+        TX_1();
       }
       
       bytePos++;
@@ -353,8 +336,8 @@ void Emulator::tx(const uint8_t *buf, uint8_t count) {
 static const uint8_t ALL_REQ = 0x52;
 static const uint8_t SENS_REQ = 0x26;
 
-static const uint8_t ATQA[] = {0x44, 0x00};
-static const uint8_t SLP_REQ[] = {0x50, 0x00};
+static const uint8_t ATQA[2] = {0x44, 0x00};
+static const uint8_t SLP_REQ[2] = {0x50, 0x00};
 static const uint8_t SAK_NC[3] = {0x04, 0xDA, 0x17}; //Select acknowledge uid not complete
 static const uint8_t SAK_C[3] = {0x00, 0xFE, 0x51}; //Select acknowledge uid complete, Type 2 (PICC not compliant to ISO/IEC 14443-4)
 
@@ -383,7 +366,6 @@ void Emulator::waitForReader() {
         } else if (uidSize == 10) {
           tx(SENS_RES[2], 2);
         }
-        // PORTA.OUTSET = _BV(PIN5);
       } else if (read == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
         // do nothing
       } else if (read == 2 && buffer[0] == SDD_REQ_CL1) {
