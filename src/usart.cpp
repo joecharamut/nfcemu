@@ -24,12 +24,11 @@ USART Serial;
 
 // when they said fractional baud rate i didnt think they literally meant it
 // http://ww1.microchip.com/downloads/en/AppNotes/TB3216-Getting-Started-with-USART-90003216A.pdf
-#define USART0_BAUD_RATE(BAUD_RATE) ((float)(F_CPU * 64 / (16 * (float)BAUD_RATE)) + 0.5)
+#define USART0_BAUD_RATE(r) ((float)(F_CPU * 64 / (16 * (float)(r))) + 0.5)
 
 void USART::begin() {
   // set PORTB.PIN2 (TXD) as output
-  PORTB.DIRSET |= _BV(PIN2);
-  PORTB.OUTSET |= _BV(PIN2);
+  PORTB.DIRSET = _BV(PIN2);
   
   // set baud rate
   USART0.BAUD = USART0_BAUD_RATE(9600);

@@ -30,6 +30,8 @@ using namespace NfcEmu;
 #define STRINGIFY(x) DO_STRINGIFY(x)
 #define DO_STRINGIFY(x) #x
 
+#define F_CPU 13560000L
+
 // #define DEBUG
 #ifdef DEBUG
 #define ASSERT(x) do { \
@@ -50,15 +52,15 @@ static constexpr uint32_t NFC_SUBCARRIER = NFC_CARRIER / 16UL;
 static constexpr uint32_t NFC_BITPERIOD = NFC_CARRIER / 128UL;
 
 // for TCA0
-static constexpr uint8_t SUBCARRIER_PER = (((F_CPU/2) + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER - 1);
-static constexpr uint8_t SUBCARRIER_CMP = ((SUBCARRIER_PER / 2) + 0.5);
-static constexpr uint8_t BITTIMEOUT_PER = (((F_CPU/2) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD - 1);
+static constexpr uint8_t SUBCARRIER_PER = (((F_CPU/2) + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER);
+static constexpr uint8_t SUBCARRIER_CMP = ((SUBCARRIER_PER / 2));
+static constexpr uint8_t BITTIMEOUT_PER = (((F_CPU/2) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
 
 // for TCB0
-static constexpr uint16_t BITPERIOD_PER = ((F_CPU + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD - 1);
-static constexpr uint16_t BITPERIOD_1_0 = (BITPERIOD_PER * 1.1);
-static constexpr uint16_t BITPERIOD_1_5 = (BITPERIOD_PER * 1.6);
-static constexpr uint16_t BITPERIOD_2_0 = (BITPERIOD_PER * 2.1);
+static constexpr uint8_t BITPERIOD_PER = (((F_CPU/2) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
+static constexpr uint8_t BITPERIOD_1_0 = (BITPERIOD_PER * 1.0);
+static constexpr uint8_t BITPERIOD_1_5 = (BITPERIOD_PER * 1.5);
+static constexpr uint8_t BITPERIOD_2_0 = (BITPERIOD_PER * 2.0);
 
 Emulator::Emulator() {}
 
@@ -67,7 +69,7 @@ Emulator::Emulator() {}
 */
 static void AC0_setup() {
   // set AINN0 and AINP0 as INPUT
-  PORTA.DIRCLR |= _BV(PIN6) | _BV(PIN7);
+  PORTA.DIRCLR = _BV(PIN6) | _BV(PIN7);
   // disable digital input buffer
   PORTA.PIN6CTRL |= PORT_ISC_INPUT_DISABLE_gc;
   PORTA.PIN7CTRL |= PORT_ISC_INPUT_DISABLE_gc;
@@ -79,15 +81,15 @@ static void AC0_setup() {
   EVSYS.ASYNCCH0 = EVSYS_ASYNCCH0_AC0_OUT_gc;
 
   // enable AC
-  AC0.CTRLA = AC_ENABLE_bm | AC_HYSMODE1_bm;
+  AC0.CTRLA = AC_ENABLE_bm | AC_HYSMODE1_bm | AC_OUTEN_bm;
 }
 
 /**
  * Setup TCA0 to generate the required 848KHz (fc/16) subcarrier on WO4 (PA4/PIN2)
 */
 static void TCA0_setup() {
-  // setup pin as input / hi-Z because we dont want to output it just yet
-  PORTA.DIRCLR |= _BV(PIN4);
+  // setup WO4 pin as input / hi-Z because we dont want to output it just yet
+  PORTA.DIRCLR = _BV(PIN4);
 
   // enable TCA split mode
   TCA0.SPLIT.CTRLD = TCA_SPLIT_SPLITM_bm;
@@ -95,9 +97,9 @@ static void TCA0_setup() {
   // setup TCA0 high to generate the load modulation subcarrier
   // enable comparator 1 high (WO4/PA4/PIN2)
   TCA0.SPLIT.CTRLB = TCA_SPLIT_HCMP1EN_bm;
-  // set period value to full range
+  // set waveform period
   TCA0.SPLIT.HPER = SUBCARRIER_PER;
-  // set duty cycle / compare value
+  // set duty cycle
   TCA0.SPLIT.HCMP1 = SUBCARRIER_CMP;
 
   // setup TCA0 low as a timeout counter 
@@ -121,7 +123,7 @@ static void TCB0_setup() {
   TCB0.CTRLB = TCB_CNTMODE_FRQ_gc;
 
   // set clock source to peripheral clock and enable
-  TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
+  TCB0.CTRLA = TCB_CLKSEL_CLKDIV2_gc | TCB_ENABLE_bm;
 }
 
 void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
@@ -131,6 +133,8 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   AC0_setup();
   TCA0_setup();
   TCB0_setup();
+
+  PORTA.DIRSET = _BV(PIN1) | _BV(PIN5);
 }
 
 static void genBcc(uint8_t *buf) {
@@ -219,76 +223,11 @@ static inline void setBitTimeoutDuration(uint8_t n) {
 
 static inline void resetBitTimeout() {
   // clear count
-  TCA0.SPLIT.LCNT = TCA0.SPLIT.LPER;
+  TCA0.SPLIT.LCNT = 0;
+  // wait for underflow
+  loop_until_bit_is_set(TCA0.SPLIT.INTFLAGS, TCA_SPLIT_LUNF_bp);
   // clear underflow interrupt
   TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
-}
-
-static volatile uint8_t rxBitMask;
-static volatile uint8_t rxBytePos;
-static volatile uint8_t rxLastBit;
-static volatile uint8_t rxBuffer[64];
-
-// rotate bitmask by 1 bit and increment bytepos if necessary
-#define NEXT_BIT() do { asm volatile (  \
-  "clc        ; clear carry flag  \n\t" \
-  "rol %0     ; rotate left       \n\t" \
-  "brcc 1f    ; if carry set:     \n\t" \
-  "  rol %0   ;   rotate left     \n\t" \
-  "  inc %1   ;   inc byte pos    \n\t" \
-  "1: nop     ; nop (branch dest) \n\t" \
-  : "+r" (rxBitMask), "=r" (rxBytePos)  \
-  : /* no input operands */             \
-); } while (0)
-
-ISR(TCB0_INT_vect) {
-  // bitmask doubling as enable condition
-  if (!rxBitMask) return;
-
-  uint16_t delta = TCB0.CCMP;
-  if (rxLastBit == 0) {
-    // space->???
-    if (delta <= BITPERIOD_1_0) {
-      // 1.0 time between bits = space
-      NEXT_BIT();
-    } else if (delta <= BITPERIOD_1_5) {
-      // 1.5 time = mark
-      rxBuffer[rxBytePos] |= rxBitMask;
-      NEXT_BIT();
-      rxLastBit = 1;
-    } else {
-      // delta > 2.0 = idle symbol (end of message)
-      NEXT_BIT();
-      NEXT_BIT();
-      rxBitMask = 0;
-      rxLastBit = 0;
-      return;
-    }
-  } else {
-    // mark->???
-    if (delta <= BITPERIOD_1_0) {
-      // 1.0 time = mark
-      rxBuffer[rxBytePos] |= rxBitMask;
-      NEXT_BIT();
-    } else if (delta <= BITPERIOD_1_5) {
-      // 1.5 time = 2 spaces
-      NEXT_BIT();
-      NEXT_BIT();
-      rxLastBit = 0;
-    } else if (delta <= BITPERIOD_2_0) {
-      // 2.0 time = space, mark
-      NEXT_BIT();
-      rxBuffer[rxBytePos] |= rxBitMask;
-      NEXT_BIT();
-    } else {
-      // delta < 1.0 || delta > 2.0  == invalid?
-      NEXT_BIT();
-      NEXT_BIT();
-      rxBitMask = 0;
-      rxLastBit = 0;
-      return;
-    }
-  }
 }
 
 /**
@@ -308,122 +247,127 @@ ISR(TCB0_INT_vect) {
  * Protocol info referenced from https://github.com/sigrokproject/libsigrokdecode/blob/master/decoders/miller/pd.py
 */
 uint8_t Emulator::rx() {
-  // prevent some runtime cost of bitshift (needed?)
-  static const uint8_t bitmask[8] = { (1<<0), (1<<1), (1<<2), (1<<3), (1<<4), (1<<5), (1<<6), (1<<7) }; 
+  #define EMIT_0() do {     \
+    if (bitPos == 8) {      \
+      /* parity bit */      \
+      bitPos = 0;           \
+      bytePos++;            \
+      buffer[bytePos] = 0;  \
+    } else {                \
+      bitPos++;             \
+    }                       \
+  } while (0)
+
+  #define EMIT_1() do {               \
+    if (bitPos == 8) {                \
+      /* parity bit */                \
+      bitPos = 0;                     \
+      bytePos++;                      \
+      buffer[bytePos] = 0;            \
+    } else {                          \
+      buffer[bytePos] |= (1<<bitPos); \
+      bitPos++;                       \
+    }                                 \
+  } while (0)
   
-  // get buffer ready
-  uint8_t bytePos = 0;
-  buffer[bytePos] = 0;
 
   // wait for start of message (TCB0 interrupt) for bd * (2^n)
-  setBitTimeoutDuration(3); // 4 bd timeout (2^2)
+  setBitTimeoutDuration(3);
   resetBitTimeout();
   while (!RX_EDGE_FLAG) {
     // if timeout return no data
     if (BIT_TIMEOUT_FLAG) return 0;
   }
+
+  // set timeout to 4 bd
+  // TCA0.SPLIT.LPER = 0xff;
   setBitTimeoutDuration(1);
+  resetBitTimeout();
 
-  // read time between edges (clears interrupt flag)
-  uint16_t edgeDelta = RX_EDGE_TIME;
-  resetRxEdgeTimer();
+  uint8_t delta = TCB0.CCMPL;
+  TCB0.INTFLAGS |= TCB_CAPT_bm;
 
-  // start of message is always 0 bit
-  uint8_t bitPos = 1;
-  uint8_t prevBit = 0;
+  uint8_t bitPos = 0;
+  uint8_t bytePos = 0;
+  uint8_t lastBit = 0;
+  buffer[0] = 0;
 
-  #define ALMOST_EQUAL(x, y) (((x) >= ((y) * 0.9)) || ((x) <= ((y) * 1.1)))
   do {
-    // on next edge...
     if (RX_EDGE_FLAG) {
-      // read delta
-      edgeDelta = RX_EDGE_TIME;
-      // Serial.printHex(edgeDelta); Serial.putchar('\n');
-      resetBitTimeout();
-      resetRxEdgeTimer();
+      delta = TCB0.CCMPL;
+      clearRxFlag();
 
-      // interpret resulting bit time
-      // should always be {1.0, 1.5, 2.0}bp
-      if (prevBit == 0) {
+      if (lastBit == 0) {
         // space->???
-        if (edgeDelta <= BITPERIOD_1_0) {
+        if (delta <= BITPERIOD_1_0) {
           // 1.0 time between bits = space
-          bitPos++;
-          prevBit = 0;
-        } else if (edgeDelta <= BITPERIOD_1_5) {
+          EMIT_0();
+        } else if (delta <= BITPERIOD_1_5) {
           // 1.5 time = mark
-          buffer[bytePos] |= (1<<bitPos);
-          bitPos++;
-          prevBit = 1;
+          EMIT_1();
+          lastBit = 1;
         } else {
           // delta > 2.0 = idle symbol (end of message)
+          // Serial.print("idle EOM break\n");
+          EMIT_0();
+          EMIT_0();
           break;
         }
       } else {
         // mark->???
-        if (edgeDelta <= BITPERIOD_1_0) {
+        if (delta <= BITPERIOD_1_0) {
           // 1.0 time = mark
-          buffer[bytePos] |= (1<<bitPos);
-          bitPos++;
-          prevBit = 1;
-        } else if (edgeDelta <= BITPERIOD_1_5) {
+          EMIT_1();
+        } else if (delta <= BITPERIOD_1_5) {
           // 1.5 time = 2 spaces
-          bitPos += 2;
-          prevBit = 0;
-        } else if (edgeDelta <= BITPERIOD_2_0) {
+          EMIT_0();
+          EMIT_0();
+          lastBit = 0;
+        } else if (delta <= BITPERIOD_2_0) {
           // 2.0 time = space, mark
-          bitPos += 2;
-          if (bitPos >= 8) {
-            bitPos -= 8;
-            bytePos++;
-          }
-          buffer[bytePos] |= (1<<bitPos);
-          bitPos++;
-          prevBit = 1;
+          EMIT_0();
+          EMIT_1();
         } else {
           // delta < 1.0 || delta > 2.0  == invalid?
-          Serial.print("delta error\n");
+          EMIT_0();
+          EMIT_0();
           break;
         }
       }
 
-      if (bitPos >= 8) {
-        bitPos -= 8;
-        bytePos++;
-      }
+      resetBitTimeout();
     }
   } while (!BIT_TIMEOUT_FLAG);
-
-  // 7-bit messages are allowed
+  
   if (bitPos >= 7) {
     bytePos++;
   }
 
-  // Serial.print("got "); Serial.print(bytePos); Serial.print(" bytes, "); Serial.print(bitPos); Serial.print(" bits\n");
   return bytePos;
 }
 
 static inline void waitForOneBit() {
   while (!BIT_TIMEOUT_FLAG);
-  resetBitTimeout();
+  // resetBitTimeout();
+  TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
 }
 
 // macros to toggle PA4 waveform pin
-#define TX_ON() do { PORTA.DIRSET |= _BV(PIN4); } while (0)
-#define TX_OFF() do { PORTA.DIRCLR |= _BV(PIN4); } while (0)
+#define TX_ON() do { PORTA.DIRSET = _BV(PIN4); } while (0)
+#define TX_OFF() do { PORTA.DIRCLR = _BV(PIN4); } while (0)
 
 #define TX_1() do { \
-  waitForOneBit(); \
   TX_ON(); \
   waitForOneBit(); \
   TX_OFF(); \
+  waitForOneBit(); \
 } while (0)
 
 #define TX_0() do { \
-  waitForOneBit(); \
   TX_OFF(); \
   waitForOneBit(); \
   TX_ON(); \
+  waitForOneBit(); \
 } while (0)
 
 #define TXBIT(x) TX_##x()
@@ -433,7 +377,14 @@ void Emulator::tx(const uint8_t *buf, uint8_t count) {
   uint8_t bitPos = 0;
   uint8_t parity = 0;
 
+  // delay 8 bd before txing reply
+  TCA0.SPLIT.LPER = 0xFF;
+  resetBitTimeout();
+  waitForOneBit();
+  
+  PORTA.OUTSET = _BV(PIN1);
   setBitTimeoutDuration(0); // 1 bd timeout (2^0)
+  waitForOneBit();
   
   // send SOC
   TXBIT(1);
@@ -465,6 +416,8 @@ void Emulator::tx(const uint8_t *buf, uint8_t count) {
   // send EOC
   waitForOneBit();
   TX_OFF();
+
+  PORTA.OUTCLR = _BV(PIN1);
 }
 
 static const uint8_t ALL_REQ = 0x52;
@@ -490,9 +443,14 @@ void Emulator::waitForReader() {
       // Serial.hexdump(buffer, read);
       if (read == 1 && (buffer[0] == SENS_REQ || buffer[0] == ALL_REQ)) {
         tx(SENS_RES[nfcid1Size], 2);
-      } else if (read > 1) {
+        // PORTA.OUTSET = _BV(PIN5);
+      } else if (read == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
+        // do nothing
+      } else {
         Serial.hexdump(buffer, read);
       }
+
+      resetBitTimeout();
     }
-  } while (0);
+  } while (1);
 }

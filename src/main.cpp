@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <stdint.h>
 #include <util/delay.h>
+#include <avr/interrupt.h>
 
 #include "usart.h"
 #include "emulator.h"
@@ -46,10 +47,12 @@ NfcEmu::Emulator emu;
 int main() {
   // disable clock prescaler
   _PROTECTED_WRITE(CLKCTRL.MCLKCTRLB, 0x00);
+  // set use extclk
+  _PROTECTED_WRITE(CLKCTRL.MCLKCTRLA, CLKCTRL_CLKSEL_EXTCLK_gc);
 
   Serial.begin();
 
-  uint16_t crc = CRC_A_INITIAL;
+  /*uint16_t crc = CRC_A_INITIAL;
   crc = crc16_iso14443_3_a(crc, 0);
   crc = crc16_iso14443_3_a(crc, 0);
   Serial.printHex(crc);
@@ -57,7 +60,7 @@ int main() {
     Serial.print("\ncrc works\n");
   } else {
     Serial.print("aaaa\n");
-  }
+  }*/
 
   emu.setup(tagStorage, sizeof(tagStorage));
   if (emu.setUid(tagUid, sizeof(tagUid)) < 0) {
