@@ -21,7 +21,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 namespace NfcA {
 
-
 /// @brief Valid commands for short frames
 enum __packed ShortCommand {
   ALL_REQ = 0x52,
@@ -29,17 +28,13 @@ enum __packed ShortCommand {
 };
 static_assert(sizeof(ShortCommand) == 1);
 
-/**
- * @short A short frame is used to initiate communication between the Poll and Listen devices
- * 
- * @details A short frame is used to initiate communication and consists of the following (see Figure 3):
- * • SoF
- * • Up to 7 data bits transmitted lsb first
- * • EoF
- * No parity is added.
- * 
- * @ref Section 4.3.2 of NFCForum-TS-DigitalProtocol-1.0
-*/
+/// @brief A short frame is used to initiate communication between the Poll and Listen devices
+/// @details A short frame is used to initiate communication and consists of the following (see Figure 3):
+///           • SoF
+///           • Up to 7 data bits transmitted lsb first
+///           • EoF
+///           No parity is added.
+/// @ref Section 4.3.2 of NFCForum-TS-DigitalProtocol-1.0
 struct __packed ShortFrame {
   ShortCommand command;
 };
@@ -59,15 +54,10 @@ enum __packed SDDCommand {
 };
 static_assert(sizeof(SDDCommand) == 1);
 
-/**
- * @short Bit oriented SDD frames are used for collision resolution
- * 
- * @details Bit oriented SDD frames are used for collision resolution 
- *   and result from a standard frame with a length of 7 bytes 
- *   that is split into two parts.
- * 
- * @ref Section 4.3.4 of NFCForum-TS-DigitalProtocol-1.0
-*/
+/// @brief Bit oriented SDD frames are used for collision resolution
+/// @details Bit oriented SDD frames are used for collision resolution 
+///           and result from a standard frame with a length of 7 bytes 
+///           that is split into two parts.
 struct __packed SDDFrame {
   SDDCollisionLevel collisionLevel : 4;
   SDDCommand command : 4;
