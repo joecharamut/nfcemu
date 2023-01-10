@@ -109,7 +109,7 @@ static void TCB0_setup() {
   // input capture frequency measurement mode
   TCB0.CTRLB = TCB_CNTMODE_FRQ_gc;
 
-  // set clock source to peripheral clock and enable
+  // set divider to CLK/1 and enable
   TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
 }
 
