@@ -30,8 +30,6 @@ using namespace NfcEmu;
 #define STRINGIFY(x) DO_STRINGIFY(x)
 #define DO_STRINGIFY(x) #x
 
-#define F_CPU 13560000L
-
 // #define DEBUG
 #ifdef DEBUG
 #define ASSERT(x) do { \
@@ -57,10 +55,10 @@ static constexpr uint8_t SUBCARRIER_CMP = ((SUBCARRIER_PER / 2));
 static constexpr uint8_t BITTIMEOUT_PER = (((F_CPU/2) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
 
 // for TCB0
-static constexpr uint8_t BITPERIOD_PER = (((F_CPU/2) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
-static constexpr uint8_t BITPERIOD_1_0 = (BITPERIOD_PER * 1.0);
-static constexpr uint8_t BITPERIOD_1_5 = (BITPERIOD_PER * 1.5);
-static constexpr uint8_t BITPERIOD_2_0 = (BITPERIOD_PER * 2.0);
+static constexpr uint16_t BITPERIOD_PER = (((F_CPU) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
+static constexpr uint16_t BITPERIOD_1_0 = (BITPERIOD_PER * 1.0);
+static constexpr uint16_t BITPERIOD_1_5 = (BITPERIOD_PER * 1.5);
+static constexpr uint16_t BITPERIOD_2_0 = (BITPERIOD_PER * 2.0);
 
 Emulator::Emulator() {}
 
@@ -123,7 +121,7 @@ static void TCB0_setup() {
   TCB0.CTRLB = TCB_CNTMODE_FRQ_gc;
 
   // set clock source to peripheral clock and enable
-  TCB0.CTRLA = TCB_CLKSEL_CLKDIV2_gc | TCB_ENABLE_bm;
+  TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
 }
 
 void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
@@ -284,8 +282,7 @@ uint8_t Emulator::rx() {
   setBitTimeoutDuration(1);
   resetBitTimeout();
 
-  uint8_t delta = TCB0.CCMPL;
-  TCB0.INTFLAGS |= TCB_CAPT_bm;
+  uint16_t delta = TCB0.CCMP;
 
   uint8_t bitPos = 0;
   uint8_t bytePos = 0;
@@ -294,8 +291,7 @@ uint8_t Emulator::rx() {
 
   do {
     if (RX_EDGE_FLAG) {
-      delta = TCB0.CCMPL;
-      clearRxFlag();
+      delta = TCB0.CCMP;
 
       if (lastBit == 0) {
         // space->???

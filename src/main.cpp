@@ -47,8 +47,6 @@ NfcEmu::Emulator emu;
 int main() {
   // disable clock prescaler
   _PROTECTED_WRITE(CLKCTRL.MCLKCTRLB, 0x00);
-  // set use extclk
-  _PROTECTED_WRITE(CLKCTRL.MCLKCTRLA, CLKCTRL_CLKSEL_EXTCLK_gc);
 
   Serial.begin();
 
