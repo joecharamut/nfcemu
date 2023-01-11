@@ -151,25 +151,20 @@ static inline void resetBitTimeout() {
   TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
 }
 
-/**
- * @short Decode modified miller encoding of the demodulated signal
- * 
- * @details "mark" = '1' bit
- * a mark will always be encoded as having an edge in the middle of the bit period
- * 
- * "space" = '0' bit
- * a space has an edge at the beginning or none at all
- * after a mark, a space will have no edge
- * after a space, a space has an edge
- * 
- * Start of message/frame: space with edge
- * End of message/frame: space followed by idle period
- * 
- * @return number of bytes successfully received
- * 
- * @ref Protocol info referenced from https://github.com/sigrokproject/libsigrokdecode/blob/master/decoders/miller/pd.py
-*/
-uint8_t Emulator::rx() {
+/// @brief Decode modified miller encoding of the demodulated signal
+/// @details "mark" = '1' bit
+///          a mark will always be encoded as having an edge in the middle of the bit period
+///          
+///          "space" = '0' bit
+///          a space has an edge at the beginning or none at all
+///          after a mark, a space will have no edge
+///          after a space, a space has an edge
+///          
+///          Start of message/frame: space with edge
+///          End of message/frame: space followed by idle period
+/// @return number of bytes successfully received
+/// @ref Protocol info referenced from https://github.com/sigrokproject/libsigrokdecode/blob/master/decoders/miller/pd.py
+uint8_t Emulator::receive() {
   // wait for start of message (TCB0 interrupt) for bd * (2^n)
   setBitTimeoutDuration(3);
   resetBitTimeout();
@@ -285,7 +280,7 @@ static inline void waitForOneBit() {
   waitForOneBit(); \
 } while (0)
 
-void Emulator::tx(const uint8_t *buf, uint8_t count) {
+void Emulator::transmit(const uint8_t *buf, uint8_t count) {
   uint8_t bytePos = 0;
   uint8_t bitPos = 0;
   uint8_t parity = 0;
@@ -354,29 +349,29 @@ static const uint8_t SENS_RES[3][2] = {
 void Emulator::waitForReader() {
   uint8_t read;
   do {
-    read = rx();
+    read = receive();
 
     if (read) {
       // Serial.hexdump(buffer, read);
       if (read == 1 && (buffer[0] == SENS_REQ || buffer[0] == ALL_REQ)) {
         if (uidSize == 4) {
-          tx(SENS_RES[0], 2);
+          transmit(SENS_RES[0], 2);
         } else if (uidSize == 7) {
-          tx(SENS_RES[1], 2);
+          transmit(SENS_RES[1], 2);
         } else if (uidSize == 10) {
-          tx(SENS_RES[2], 2);
+          transmit(SENS_RES[2], 2);
         }
       } else if (read == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
         // do nothing
       } else if (read == 2 && buffer[0] == SDD_REQ_CL1) {
         NfcA::genSddResponse(uid, uidSize, 0, buffer);
-        tx(buffer, 5);
+        transmit(buffer, 5);
       } else if (read == 2 && buffer[0] == SDD_REQ_CL2) {
         NfcA::genSddResponse(uid, uidSize, 1, buffer);
-        tx(buffer, 5);
+        transmit(buffer, 5);
       } else if (read == 2 && buffer[0] == SDD_REQ_CL3) {
         NfcA::genSddResponse(uid, uidSize, 2, buffer);
-        tx(buffer, 5);
+        transmit(buffer, 5);
       } else {
         Serial.hexdump(buffer, read);
       }
