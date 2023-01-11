@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "emulator.h"
 #include "usart.h"
-#include "nfc/funcs.h"
+#include "nfc/a/funcs.h"
 
 #include <util/delay.h>
 #include <string.h>
