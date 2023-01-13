@@ -38,14 +38,59 @@ const uint8_t NDEF_CC_READ_ALLOW = 0x0;
 const uint8_t NDEF_CC_WRITE_ALLOW = 0x0;
 const uint8_t NDEF_CC_WRITE_DENY = 0xf;
 
-struct __packed CompatibilityContainer {
+struct __packed CapabilityContainer {
   uint8_t magic;
   uint8_t version;
   uint8_t memorySize;
   uint8_t readAccess : 4;
   uint8_t writeAccess : 4;
 };
-static_assert(sizeof(CompatibilityContainer) == 4);
+static_assert(sizeof(CapabilityContainer) == 4);
+
+enum __packed Command {
+  T2T_CMD_READ = 0x30,
+  T2T_CMD_WRITE = 0xA2,
+  T2T_CMD_SECTOR_SELECT = 0xC2,
+};
+static_assert(sizeof(Command) == 1);
+
+enum __packed NACK {
+  NACK_0h = 0b0000,
+  NACK_1h = 0b0001,
+  NACK_4h = 0b0100,
+  NACK_5h = 0b0101,
+};
+static_assert(sizeof(NACK) == 1);
+
+enum __packed ACK {
+  ACK_Ah = 0b1010,
+};
+static_assert(sizeof(ACK) == 1);
+
+struct __packed ReadCommandPacket {
+  Command cmd;
+  uint8_t blockNum;
+};
+static_assert(sizeof(ReadCommandPacket) == 2);
+
+struct __packed WriteCommandPacket {
+  Command cmd;
+  uint8_t blockNum;
+  uint8_t data[4];
+};
+static_assert(sizeof(WriteCommandPacket) == 6);
+
+struct __packed SectorSelectPacket1 {
+  Command cmd;
+  uint8_t flag;
+};
+static_assert(sizeof(SectorSelectPacket1) == 2);
+
+struct __packed SectorSelectPacket2 {
+  uint8_t sectorNum;
+  uint8_t reserved[3];
+};
+static_assert(sizeof(SectorSelectPacket2) == 4);
 
 namespace TLV {
 

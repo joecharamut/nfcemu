@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "emulator.h"
 #include "usart.h"
 #include "nfc/a/funcs.h"
+#include "nfc/a/types.h"
 
 #include <util/delay.h>
 #include <string.h>
@@ -215,8 +216,8 @@ uint8_t Emulator::receive() {
           lastBit = 1;
         } else {
           // delta > 2.0 = idle symbol (end of message)
-          BIT(0);
-          BIT(0);
+          // BIT(0);
+          // BIT(0);
           break;
         }
       } else {
@@ -235,8 +236,8 @@ uint8_t Emulator::receive() {
           BIT(1);
         } else {
           // delta < 1.0 || delta > 2.0  == invalid?
-          BIT(0);
-          BIT(0);
+          // BIT(0);
+          // BIT(0);
           break;
         }
       }
@@ -245,8 +246,16 @@ uint8_t Emulator::receive() {
     }
   } while (!BIT_TIMEOUT_FLAG);
   
-  // 7 bit frames are valid short frames, so round up to a byte
-  if (bitPos >= 7) {
+  /**
+   * A short frame is used to initiate communication and consists of the following:
+   * • SoF
+   * • Up to 7 data bits transmitted lsb first
+   * • EoF
+   * so according to the nfc forum 0 bit frames are valid but i'm going to ignore them
+   * unfortunetly the nfc forum decided that they only feel like issuing 4 bit responses
+   * for type-2 tags so this is a compromise
+   */
+  if (bitPos >= 4) {
     bytePos++;
   }
 
@@ -256,6 +265,15 @@ uint8_t Emulator::receive() {
 static inline void waitForOneBit() {
   while (!BIT_TIMEOUT_FLAG);
   TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
+}
+
+static inline void waitNBitPeriods(uint8_t n) {
+  setBitTimeoutDuration(0);
+  resetBitTimeout();
+  while (n) {
+    waitForOneBit();
+    --n;
+  }
 }
 
 // enable waveform output on PA4
@@ -286,9 +304,7 @@ void Emulator::transmit(const uint8_t *buf, uint8_t count) {
   uint8_t parity = 0;
 
   // TODO: wait correct delay before transmit
-  // TCA0.SPLIT.LPER = 0xFF;
-  resetBitTimeout();
-  // waitForOneBit();
+  waitNBitPeriods(8);
   
   PORTA.OUTSET = _BV(PIN1);
   setBitTimeoutDuration(0); // 1 bd timeout (2^0)
@@ -336,10 +352,6 @@ static const uint8_t SLP_REQ[2] = {0x50, 0x00};
 static const uint8_t SAK_NC[3] = {0x04, 0xDA, 0x17}; //Select acknowledge uid not complete
 static const uint8_t SAK_C[3] = {0x00, 0xFE, 0x51}; //Select acknowledge uid complete, Type 2 (PICC not compliant to ISO/IEC 14443-4)
 
-static const uint8_t SDD_REQ_CL1 = 0x93;
-static const uint8_t SDD_REQ_CL2 = 0x95;
-static const uint8_t SDD_REQ_CL3 = 0x97;
-
 static const uint8_t SENS_RES[3][2] = {
   { 0b00000100, 0b00000000 }, // SEL_RES CL1 ( 4 UID bytes)
   { 0b01000100, 0b00000000 }, // SEL_RES CL2 ( 7 UID bytes)
@@ -363,14 +375,9 @@ void Emulator::waitForReader() {
         }
       } else if (read == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
         // do nothing
-      } else if (read == 2 && buffer[0] == SDD_REQ_CL1) {
-        NfcA::genSddResponse(uid, uidSize, 0, buffer);
-        transmit(buffer, 5);
-      } else if (read == 2 && buffer[0] == SDD_REQ_CL2) {
-        NfcA::genSddResponse(uid, uidSize, 1, buffer);
-        transmit(buffer, 5);
-      } else if (read == 2 && buffer[0] == SDD_REQ_CL3) {
-        NfcA::genSddResponse(uid, uidSize, 2, buffer);
+      } else if (read == 2 && ((NfcA::SDDFrame *)buffer)->command == NfcA::SDDCommand::SDD_REQ) {
+        uint8_t col_idx = ((NfcA::SDDFrame *)buffer)->collisionLevel / 2 - 1;
+        NfcA::genSddResponse(uid, uidSize, col_idx, buffer);
         transmit(buffer, 5);
       } else {
         Serial.hexdump(buffer, read);
