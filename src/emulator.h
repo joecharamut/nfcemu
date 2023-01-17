@@ -59,6 +59,10 @@ private:
   uint8_t uidSize;
 
   uint8_t buffer[64];
+
+  void handleShortFrame();
+  void handleSDDFrame();
+  void handleStandardFrame(uint8_t read);
 };
 
 };

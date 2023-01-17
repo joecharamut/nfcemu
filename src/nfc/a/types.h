@@ -63,6 +63,7 @@ struct __packed SDDFrame {
   SDDCommand command : 4;
   uint8_t bitCount : 4;
   uint8_t byteCount : 4;
+  uint8_t data[];
 };
 static_assert(sizeof(SDDFrame) == 2);
 

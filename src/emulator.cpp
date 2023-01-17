@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "usart.h"
 #include "nfc/a/funcs.h"
 #include "nfc/a/types.h"
+#include "nfc/crc.h"
 
 #include <util/delay.h>
 #include <string.h>
@@ -53,7 +54,7 @@ static void AC0_setup() {
   // disable digital input buffer
   PORTA.PIN6CTRL |= PORT_ISC_INPUT_DISABLE_gc;
   PORTA.PIN7CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-  // enable pullup (TODO: needed?)
+  // enable pullup (TODO: needed vs hysteresis?)
   // PORTA.PIN6CTRL |= PORT_PULLUPEN_bm;
   // PORTA.PIN7CTRL |= PORT_PULLUPEN_bm;
 
@@ -215,8 +216,7 @@ uint8_t Emulator::receive() {
           BIT(1);
           lastBit = 1;
         } else {
-          // delta > 2.0 = idle symbol (end of message)
-          // BIT(0);
+          // delta > 2.0 = space, idle (end of message)
           // BIT(0);
           break;
         }
@@ -235,8 +235,7 @@ uint8_t Emulator::receive() {
           BIT(0);
           BIT(1);
         } else {
-          // delta < 1.0 || delta > 2.0  == invalid?
-          // BIT(0);
+          // delta > 2.0  == space, idle (end of message)
           // BIT(0);
           break;
         }
@@ -277,9 +276,9 @@ static inline void waitNBitPeriods(uint8_t n) {
 }
 
 // enable waveform output on PA4
-#define TX_ON() do { PORTA.DIRSET = _BV(PIN4); } while (0)
+#define TX_ON() do { PORTA.DIRSET = _BV(PIN4); PORTA.OUTSET = _BV(PIN1); } while (0)
 // disable waveform output on PA4
-#define TX_OFF() do { PORTA.DIRCLR = _BV(PIN4); } while (0)
+#define TX_OFF() do { PORTA.DIRCLR = _BV(PIN4); PORTA.OUTCLR = _BV(PIN1); } while (0)
 
 // TODO: should waitForOneBit really be waiting for half a bit??
 // transmit a '1' (modulation for 1/2 bd, no modulation 1/2 bd)
@@ -304,13 +303,13 @@ void Emulator::transmit(const uint8_t *buf, uint8_t count) {
   uint8_t parity = 0;
 
   // TODO: wait correct delay before transmit
-  waitNBitPeriods(8);
+  waitNBitPeriods(6);
   
-  PORTA.OUTSET = _BV(PIN1);
+  // PORTA.OUTSET = _BV(PIN1);
   setBitTimeoutDuration(0); // 1 bd timeout (2^0)
   waitForOneBit();
   
-  // send SOC
+  // send SoF
   TX_1();
 
   do {
@@ -332,20 +331,18 @@ void Emulator::transmit(const uint8_t *buf, uint8_t count) {
       }
       
       bytePos++;
+      count--;
       bitPos = 0;
       parity = 0;
     }
-  } while (bytePos < count);
+  } while (count);
 
-  // send EOC
-  waitForOneBit();
+  // send EoF
   TX_OFF();
+  waitForOneBit();
 
-  PORTA.OUTCLR = _BV(PIN1);
+  // PORTA.OUTCLR = _BV(PIN1);
 }
-
-static const uint8_t ALL_REQ = 0x52;
-static const uint8_t SENS_REQ = 0x26;
 
 static const uint8_t ATQA[2] = {0x44, 0x00};
 static const uint8_t SLP_REQ[2] = {0x50, 0x00};
@@ -358,6 +355,58 @@ static const uint8_t SENS_RES[3][2] = {
   { 0b10000100, 0b00000000 }, // SEL_RES CL3 (10 UID bytes)
 };
 
+void Emulator::handleShortFrame() {
+  NfcA::ShortFrame *fr = (NfcA::ShortFrame *)buffer;
+
+  if (fr->command == NfcA::ShortCommand::SENS_REQ || fr->command == NfcA::ShortCommand::ALL_REQ) {
+    if (uidSize == 4) {
+      transmit(SENS_RES[0], 2);
+    } else if (uidSize == 7) {
+      transmit(SENS_RES[1], 2);
+    } else if (uidSize == 10) {
+      transmit(SENS_RES[2], 2);
+    }
+  }
+}
+
+void Emulator::handleSDDFrame() {
+  NfcA::SDDFrame *fr = (NfcA::SDDFrame *)buffer;
+  
+  if (fr->command == NfcA::SDDCommand::SDD_REQ && fr->byteCount == 2 && fr->bitCount == 0) {
+    uint8_t col_idx = fr->collisionLevel / 2 - 1;
+    NfcA::genSddResponse(uid, uidSize, col_idx, buffer);
+    transmit(buffer, 5);
+  }
+}
+
+void Emulator::handleStandardFrame(uint8_t read) {
+  NfcA::SDDFrame *fr = (NfcA::SDDFrame *)buffer;
+
+  // TODO: check crc value?
+  if (buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
+    // SLP_REQ: do nothing / TODO: put device into idle state
+  } else if (read == 7 && fr->command == NfcA::SDDCommand::SDD_REQ && fr->byteCount == 7 && fr->bitCount == 0) {
+    // SEL_REQ
+    uint8_t col_idx = fr->collisionLevel / 2 - 1;
+    uint8_t *uid_buf = fr->data + 5;
+
+    NfcA::genSddResponse(uid, uidSize, col_idx, uid_buf);
+    if (memcmp(fr->data, uid_buf, 5) == 0) {
+      buffer[0] = 0x00;
+      if (uid_buf[0] == 0x88) {
+        buffer[0] |= 0b00000100;
+      }
+      CRC::appendCrc16A(buffer, 1);
+      transmit(buffer, 3);
+    }
+  }
+  
+  
+  else {
+    Serial.hexdump(buffer, read);
+  }
+}
+
 void Emulator::waitForReader() {
   uint8_t read;
   do {
@@ -365,22 +414,13 @@ void Emulator::waitForReader() {
 
     if (read) {
       // Serial.hexdump(buffer, read);
-      if (read == 1 && (buffer[0] == SENS_REQ || buffer[0] == ALL_REQ)) {
-        if (uidSize == 4) {
-          transmit(SENS_RES[0], 2);
-        } else if (uidSize == 7) {
-          transmit(SENS_RES[1], 2);
-        } else if (uidSize == 10) {
-          transmit(SENS_RES[2], 2);
-        }
-      } else if (read == 4 && buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
-        // do nothing
-      } else if (read == 2 && ((NfcA::SDDFrame *)buffer)->command == NfcA::SDDCommand::SDD_REQ) {
-        uint8_t col_idx = ((NfcA::SDDFrame *)buffer)->collisionLevel / 2 - 1;
-        NfcA::genSddResponse(uid, uidSize, col_idx, buffer);
-        transmit(buffer, 5);
+
+      if (read == 1) {
+        handleShortFrame();
+      } else if (read == 2) {
+        handleSDDFrame();
       } else {
-        Serial.hexdump(buffer, read);
+        handleStandardFrame(read);
       }
 
       resetBitTimeout();
