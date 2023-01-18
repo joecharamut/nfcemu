@@ -24,12 +24,36 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "emulator.h"
 
 uint8_t tagStorage[] = {
-  0x00, 0x00, 0x00, 0x00, // Page 0, byte 0..3: UID0-UID3
-  0x00, 0x00, 0x00, 0x00, // Page 1, byte 0..3: UID4-UID7
-  0x00, 0x00, 0x00, 0x00, // P2 b0: UID8, P2 b1: Internal, P2 b2..3: Lock bytes
-  0xE1, 0x10, 0x80, 0x00, // P3 b0..3: Capability Container [E1h = magic, 10h = version, 80h = mem size, 00h = rw access]
+  // Block 0: UID/Internal
+  0x00, 0x00, 0x00, 0x00, // UID0-UID3
 
-  0x03, 0xFF, 0x00, 0x1D, // P4 b0..3: TLV Block, Type: NDEF Message (03h), length: 29 bytes (FFh: 2 byte length)
+  // Block 1: UID/Internal
+  0x00, 0x00, 0x00, 0x00, // UID4-UID7
+
+  // Block 2: UID/Internal, Lock
+  0x00, 0x00, 0x00, 0x00, // UID8, Internal, Lock0, Lock1
+
+  // Block 3: Capability Container
+    // CC magic number
+    0xE1, 
+    // version 1.0
+    0x10, 
+    // memory size/8 (0x04 = 32 bytes)
+    0x04, 
+    // access (r/w allowed)
+    0x00, 
+
+  // Block 4+: Data area
+
+  // TLV Block Header
+    // Tag: NDEF Message
+    0x03, 
+    // Length: 0xFF = 3 byte length value
+    0xFF, 
+    // Length: 28 bytes
+    0x00, 0x1C,
+
+  // TLV Block Data
   0xC2, // NDEF Record [MB=1, ME=1, CF=0, SR=0, IL=0, TNF=0x2]
   0x0A, // Type length: 10 bytes
   0x00, // Payload length 3: 0
@@ -41,7 +65,7 @@ uint8_t tagStorage[] = {
   't', 'e', 'x', 't', '/', 'p', 'l', 'a', 'i', 'n',
 
   // Payload 0
-  'H', 'e', 'l', 'l', 'o', ' ', ',', 'W', 'o', 'r', 'l', 'd', '!',
+  'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd', '!',
 };
 
 uint8_t tagUid[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
