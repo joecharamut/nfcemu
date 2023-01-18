@@ -188,7 +188,7 @@ class Decoder(srd.Decoder):
                 if sof:
                     self.put(int(last_bit[1]), int(last_bit[2]), self.out_ann, [1, ['End of Frame', 'EoF', 'E']])
                     cmd_end = int(last_bit[2])
-                    if bit_pos >= 4:
+                    if bit_pos > 1:
                         self.put(int(byte_start), int(last_bit[1]), self.out_ann, [1, ['{:02X}'.format(cur_byte)]])
                         bytes_read.append(cur_byte)
                         cur_byte = 0

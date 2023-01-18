@@ -33,9 +33,10 @@ static constexpr uint32_t NFC_SUBCARRIER = NFC_CARRIER / 16UL;
 static constexpr uint32_t NFC_BITPERIOD = NFC_CARRIER / 128UL;
 
 // for TCA0
-static constexpr uint8_t SUBCARRIER_PER = (((F_CPU/2) + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER);
-static constexpr uint8_t SUBCARRIER_CMP = ((SUBCARRIER_PER / 2));
-static constexpr uint8_t BITTIMEOUT_PER = (((F_CPU/2) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
+static constexpr uint8_t SUBCARRIER_PER = (((F_CPU/1) + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER);
+static constexpr uint8_t SUBCARRIER_CMP = ((SUBCARRIER_PER / 2) - 1);
+static constexpr uint8_t BITTIMEOUT_PER = (((F_CPU/1) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
+static constexpr uint8_t HALF_BIT_TIMEOUT_PER = (BITTIMEOUT_PER/2);
 
 // for TCB0
 static constexpr uint16_t BITPERIOD_PER = (((F_CPU) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
@@ -92,10 +93,10 @@ static void TCA0_setup() {
   TCA0.SPLIT.HCMP1 = SUBCARRIER_CMP;
 
   // setup TCA0 low as a timeout counter 
-  TCA0.SPLIT.LPER = BITTIMEOUT_PER << 1;
+  TCA0.SPLIT.LPER = BITTIMEOUT_PER;
 
   // set divider to CLK/2 and enable
-  TCA0.SPLIT.CTRLA = TCA_SPLIT_CLKSEL_DIV2_gc | TCA_SPLIT_ENABLE_bm;
+  TCA0.SPLIT.CTRLA = TCA_SPLIT_CLKSEL_DIV1_gc | TCA_SPLIT_ENABLE_bm;
 }
 
 /**
@@ -124,6 +125,7 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   TCB0_setup();
 
   PORTA.DIRSET = _BV(PIN1);
+  PORTB.DIRSET = _BV(PIN3);
 }
 
 void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
@@ -135,14 +137,6 @@ void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
 #define RX_EDGE_TIME (TCB0.CCMP)
 
 #define BIT_TIMEOUT_FLAG (TCA0.SPLIT.INTFLAGS & TCA_SPLIT_LUNF_bm)
-
-// set timeout duration to bd*(2^n)
-static inline void setBitTimeoutDuration(uint8_t n) {
-  // TCA0 is clocked at appx. fc/16 (848KHz),
-  // 1 bit-period is fc/128 (106KHz) = 8 counts
-  // bitshift is faster than multiplication, but can only step in *2 multiples
-  TCA0.SPLIT.LPER = (uint8_t) BITTIMEOUT_PER << n;
-}
 
 static inline void resetBitTimeout() {
   // clear count
@@ -168,15 +162,18 @@ static inline void resetBitTimeout() {
 /// @return number of bytes successfully received
 uint8_t Emulator::receive() {
   // wait for start of message (TCB0 interrupt) for bd * (2^n)
-  setBitTimeoutDuration(3);
+  uint8_t timeout_cnt = 0;
   resetBitTimeout();
   while (!RX_EDGE_FLAG) {
     // if timeout return no data
-    if (BIT_TIMEOUT_FLAG) return 0;
+    if (BIT_TIMEOUT_FLAG) {
+      if (++timeout_cnt >= 6) break;
+      resetBitTimeout();
+    }
   }
 
-  // set timeout to 4 bd
-  setBitTimeoutDuration(1);
+  // set timeout
+  TCA0.SPLIT.LPER = 0xFF;
   resetBitTimeout();
 
   uint16_t delta = RX_EDGE_TIME;
@@ -258,43 +255,47 @@ uint8_t Emulator::receive() {
     bytePos++;
   }
 
+  TCA0.SPLIT.LPER = BITTIMEOUT_PER;
+
   return bytePos;
 }
 
-static inline void waitForOneBit() {
+static inline void waitForBitTimer() {
   while (!BIT_TIMEOUT_FLAG);
   TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
 }
 
 static inline void waitNBitPeriods(uint8_t n) {
-  setBitTimeoutDuration(0);
+  uint8_t old = TCA0.SPLIT.LPER;
+  TCA0.SPLIT.LPER = BITTIMEOUT_PER;
   resetBitTimeout();
   while (n) {
-    waitForOneBit();
+    waitForBitTimer();
     --n;
   }
+  TCA0.SPLIT.LPER = old;
 }
 
 // enable waveform output on PA4
-#define TX_ON() do { PORTA.DIRSET = _BV(PIN4); PORTA.OUTSET = _BV(PIN1); } while (0)
+#define TX_ON() do { TCA0.SPLIT.HCNT = TCA0.SPLIT.HPER; PORTA.DIRSET = _BV(PIN4); PORTA.OUTSET = _BV(PIN1); PORTB.OUTTGL = _BV(PIN3); } while (0)
 // disable waveform output on PA4
-#define TX_OFF() do { PORTA.DIRCLR = _BV(PIN4); PORTA.OUTCLR = _BV(PIN1); } while (0)
+#define TX_OFF() do { PORTA.DIRCLR = _BV(PIN4); PORTA.OUTCLR = _BV(PIN1); PORTB.OUTTGL = _BV(PIN3); } while (0)
 
-// TODO: should waitForOneBit really be waiting for half a bit??
+// TODO: should waitForBitTimer really be waiting for half a bit??
 // transmit a '1' (modulation for 1/2 bd, no modulation 1/2 bd)
 #define TX_1() do { \
+  waitForBitTimer(); \
   TX_ON(); \
-  waitForOneBit(); \
+  waitForBitTimer(); \
   TX_OFF(); \
-  waitForOneBit(); \
 } while (0)
 
 // transmit a '0' (no modulation for 1/2 bd, modulation 1/2 bd)
 #define TX_0() do { \
+  waitForBitTimer(); \
   TX_OFF(); \
-  waitForOneBit(); \
+  waitForBitTimer(); \
   TX_ON(); \
-  waitForOneBit(); \
 } while (0)
 
 void Emulator::transmit(const uint8_t *buf, uint8_t count) {
@@ -302,12 +303,17 @@ void Emulator::transmit(const uint8_t *buf, uint8_t count) {
   uint8_t bitPos = 0;
   uint8_t parity = 0;
 
+  
+
   // TODO: wait correct delay before transmit
   waitNBitPeriods(6);
   
-  // PORTA.OUTSET = _BV(PIN1);
-  setBitTimeoutDuration(0); // 1 bd timeout (2^0)
-  waitForOneBit();
+  // setup bit timer to wait for half bit period (oops)
+  TCA0.SPLIT.LPER = HALF_BIT_TIMEOUT_PER;
+  waitForBitTimer();
+  waitForBitTimer();
+
+  PORTB.OUTCLR = _BV(PIN3);
   
   // send SoF
   TX_1();
@@ -337,11 +343,12 @@ void Emulator::transmit(const uint8_t *buf, uint8_t count) {
     }
   } while (count);
 
-  // send EoF
-  TX_OFF();
-  waitForOneBit();
 
-  // PORTA.OUTCLR = _BV(PIN1);
+  // send EoF
+  waitForBitTimer();
+  TX_OFF();
+
+  PORTB.OUTCLR = _BV(PIN3);
 }
 
 static const uint8_t ATQA[2] = {0x44, 0x00};

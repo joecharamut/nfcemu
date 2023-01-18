@@ -21,14 +21,14 @@ name=D1
 color=4291559424
 conv_options=0
 conversion_type=0
-enabled=false
+enabled=true
 name=D2
 
 [D3]
 color=4294277376
 conv_options=0
 conversion_type=0
-enabled=false
+enabled=true
 name=D3
 
 [D4]
@@ -69,14 +69,16 @@ conv_options=0
 conversion_type=0
 decoder0\ann_class0\visible=true
 decoder0\ann_class1\visible=true
+decoder0\ann_class2\visible=true
 decoder0\id=nfc-miller
 decoder0\options=0
 decoder0\row0\visible=true
 decoder0\row1\visible=true
+decoder0\row2\visible=true
 decoder0\visible=true
 decoders=1
 enabled=true
-name=NFC (Miller)
+name=NFC Poll
 
 [decode_signal1]
 channel0\assigned_signal_name=D1
@@ -106,7 +108,7 @@ decoder0\ann_class6\visible=true
 decoder0\ann_class7\visible=true
 decoder0\ann_class8\visible=true
 decoder0\ann_class9\visible=true
-decoder0\id=ook
+decoder0\id=nfc-ook
 decoder0\option0\name=preamlen
 decoder0\option0\type=s
 decoder0\option0\value=@ByteArray(0\0)
@@ -116,7 +118,7 @@ decoder0\option1\value=@ByteArray(ascii\0)
 decoder0\option2\name=invert_rx
 decoder0\option2\type=s
 decoder0\option2\value=@ByteArray(no\0)
-decoder0\options=1
+decoder0\options=0
 decoder0\row0\visible=true
 decoder0\row1\visible=true
 decoder0\row2\visible=true
@@ -130,20 +132,20 @@ decoder0\row9\visible=true
 decoder0\visible=true
 decoders=1
 enabled=true
-name=OOK
+name=NFC Listen
 
 [view0]
-D0\trace_height=36
-D1\trace_height=36
-D2\trace_height=36
-D3\trace_height=36
-D4\trace_height=36
-D5\trace_height=36
-D6\trace_height=36
-D7\trace_height=36
-offset=22 serialization::archive 19 0 0 0 0 20 850000 36 15774346 59920982 8514355 0 1 0 6
-scale=0.025628906250000003
+D0\trace_height=34
+D1\trace_height=34
+D2\trace_height=34
+D3\trace_height=34
+D4\trace_height=34
+D5\trace_height=34
+D6\trace_height=34
+D7\trace_height=34
+offset=22 serialization::archive 19 0 0 0 0 4 44856524 70798305 7164485 37641799 25205392 0 0 0 6
+scale=8.890354382680475e-07
 segment_display_mode=1
-splitter_state=@ByteArray(\0\0\0\xff\0\0\0\x1\0\0\0\x2\0\0\0\x63\0\0\x4J\x1\0\0\0\x1\x1\0\0\0\x1\0)
-v_offset=-108
+splitter_state=@ByteArray(\0\0\0\xff\0\0\0\x1\0\0\0\x2\0\0\0\x66\0\0\x5\xa2\x1\0\0\0\x1\x1\0\0\0\x1\0)
+v_offset=-173
 zero_offset=22 serialization::archive 19 0 0 0 0 0 0 0 0 0 0 0 0 0 6

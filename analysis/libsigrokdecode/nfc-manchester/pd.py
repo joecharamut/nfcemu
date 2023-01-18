@@ -95,7 +95,6 @@ class Decoder(srd.Decoder):
 
     def decode_bits(self):
         timeunit = self.samplerate / self.options['baudrate']
-        bitperiod = 2*timeunit
         
         lastedge = None
         lastedgetype = None
@@ -103,19 +102,19 @@ class Decoder(srd.Decoder):
         decoding = False
 
         # wait for initial rising edge
-        value, = self.wait({0: 'r'})
-        yield (str(value), self.samplenum, self.samplenum+bitperiod)
-        lastbitend = self.samplenum+bitperiod
+        next_bit, = self.wait({0: 'r'})
+        yield (str(next_bit), self.samplenum, self.samplenum+timeunit)
+        lastbitend = self.samplenum+timeunit
 
         while True:
-            next_bit, = self.wait({"skip": int(0.75*bitperiod)})
-            self.wait([{0: "e"}, {"skip": int(bitperiod)}])
+            next_bit, = self.wait({"skip": int(0.75*timeunit)})
+            self.wait([{0: "e"}, {"skip": int(2*timeunit)}])
 
             if self.matched[1]:
-                yield (False, lastbitend, lastbitend+bitperiod)
+                yield (False, lastbitend, lastbitend+timeunit)
                 break
-            yield (str(next_bit), lastbitend, lastbitend+bitperiod)
-            lastbitend = lastbitend+bitperiod
+            yield (str(next_bit), lastbitend, lastbitend+timeunit)
+            lastbitend = lastbitend+timeunit
 
     def run_decode(self):
         timeunit = self.samplerate / self.options['baudrate']
@@ -136,7 +135,7 @@ class Decoder(srd.Decoder):
             if value is False:
                 active = False
                 self.put(int(ss), int(es), self.out_ann, [1, ["End of Frame", "EoF", "E"]])
-                if bitpos > 1:
+                if bitpos:
                     bytes_read.append(cur_byte)
                     cur_byte = 0
                     bitpos = 0
