@@ -22,9 +22,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 static const char NUM_ALPHABET[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"; 
 USART Serial;
 
-// when they said fractional baud rate i didnt think they literally meant it
-// http://ww1.microchip.com/downloads/en/AppNotes/TB3216-Getting-Started-with-USART-90003216A.pdf
-#define USART0_BAUD_RATE(r) ((float)(F_CPU * 64 / (16 * (float)(r))) + 0.5)
+/// @brief Calculate the BAUD divisor for use in the USART
+/// @details Still don't understand why it's a float expression into a uint16 but w/e
+/// @ref http://ww1.microchip.com/downloads/en/AppNotes/TB3216-Getting-Started-with-USART-90003216A.pdf
+/// @param baudrate target baud rate
+/// @return BAUD divisor
+constexpr uint16_t USART0_BAUD_RATE(uint16_t baudrate) {
+  return ((float)(F_CPU * 64 / (16 * (float)(baudrate))) + 0.5);
+}
 
 void USART::begin() {
   // set PORTB.PIN2 (TXD) as output
