@@ -164,8 +164,8 @@ static inline void resetBitTimeout() {
 ///          
 ///          Start of message/frame: space with edge
 ///          End of message/frame: space followed by idle period
-/// @return number of bytes successfully received
 /// @ref Protocol info referenced from https://github.com/sigrokproject/libsigrokdecode/blob/master/decoders/miller/pd.py
+/// @return number of bytes successfully received
 uint8_t Emulator::receive() {
   // wait for start of message (TCB0 interrupt) for bd * (2^n)
   setBitTimeoutDuration(3);
