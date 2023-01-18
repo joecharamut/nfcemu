@@ -33,9 +33,9 @@ def roundto(x, k=1.0):
 class Decoder(srd.Decoder):
     api_version = 3
     id = 'nfc-miller'
-    name = 'NFC (Miller)'
-    longname = 'NFC Miller Protocol'
-    desc = 'Decode NFC miller (Poll->Listen) communication'
+    name = 'NFC Poll'
+    longname = 'NFC Poll->Listen communication (Miller encoding)'
+    desc = 'Decode NFC miller communication'
     license = 'gplv2+'
     inputs = ['logic']
     outputs = []
