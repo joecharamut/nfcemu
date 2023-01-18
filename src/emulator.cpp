@@ -276,64 +276,92 @@ static inline void waitNBitPeriods(uint8_t n) {
   TCA0.SPLIT.LPER = old;
 }
 
-// enable waveform output on PA4
-#define TX_ON() do { TCA0.SPLIT.HCNT = TCA0.SPLIT.HPER; PORTA.DIRSET = _BV(PIN4); PORTA.OUTSET = _BV(PIN1); PORTB.OUTTGL = _BV(PIN3); } while (0)
-// disable waveform output on PA4
-#define TX_OFF() do { PORTA.DIRCLR = _BV(PIN4); PORTA.OUTCLR = _BV(PIN1); PORTB.OUTTGL = _BV(PIN3); } while (0)
+/// @brief Output waveform on PA4 for load modulation
+static inline void tx_high() {
+  // reset waveform timer
+  TCA0.SPLIT.HCNT = HALF_BIT_TIMEOUT_PER;
+  // enable output
+  // PORTA.DIRSET = _BV(PIN4);
+  VPORTA.DIR |= _BV(PIN4);
 
-// TODO: should waitForBitTimer really be waiting for half a bit??
-// transmit a '1' (modulation for 1/2 bd, no modulation 1/2 bd)
-#define TX_1() do { \
-  waitForBitTimer(); \
-  TX_ON(); \
-  waitForBitTimer(); \
-  TX_OFF(); \
-} while (0)
+  // debug
+  // PORTA.OUTSET = _BV(PIN1);
+  // PORTB.OUTTGL = _BV(PIN3);
+}
 
-// transmit a '0' (no modulation for 1/2 bd, modulation 1/2 bd)
-#define TX_0() do { \
-  waitForBitTimer(); \
-  TX_OFF(); \
-  waitForBitTimer(); \
-  TX_ON(); \
-} while (0)
+/// @brief Stop outputting waveform on PA4 for load modulation
+static inline void tx_low() {
+  // disable output
+  // PORTA.DIRCLR = _BV(PIN4);
+  VPORTA.DIR &= ~_BV(PIN4);
+
+  // debug
+  // PORTA.OUTCLR = _BV(PIN1);
+  // PORTB.OUTTGL = _BV(PIN3);
+}
+
+/// @brief Transmit a one bit (high->low after 1/2bd)
+static inline void tx_one() {
+  waitForBitTimer();
+  tx_high();
+  waitForBitTimer();
+  tx_low();
+}
+
+/// @brief Transmit a zero bit (low->high after 1/2bd)
+static inline void tx_zero() {
+  waitForBitTimer();
+  tx_low();
+  waitForBitTimer();
+  tx_high();
+}
+
+/// @brief Transmit start of frame condition (a one bit)
+static inline void tx_sof() {
+  tx_one();
+}
+
+/// @brief Transmit end of frame condition (no modulation for 1bd)
+static inline void tx_eof() {
+  waitForBitTimer();
+  tx_low();
+  waitForBitTimer();
+}
 
 void Emulator::transmit(const uint8_t *buf, uint8_t count) {
   uint8_t bytePos = 0;
   uint8_t bitPos = 0;
   uint8_t parity = 0;
 
-  
-
   // TODO: wait correct delay before transmit
   waitNBitPeriods(6);
   
   // setup bit timer to wait for half bit period (oops)
   TCA0.SPLIT.LPER = HALF_BIT_TIMEOUT_PER;
+  // reset count
+  TCA0.SPLIT.LCNT = HALF_BIT_TIMEOUT_PER;
   waitForBitTimer();
   waitForBitTimer();
 
-  PORTB.OUTCLR = _BV(PIN3);
-  
   // send SoF
-  TX_1();
+  tx_sof();
 
   do {
     if (buf[bytePos] & (1<<bitPos)) {
       // 1 bit
-      TX_1();
+      tx_one();
       parity ^= 1;
     } else {
       // 0 bit
-      TX_0();
+      tx_zero();
     }
     bitPos++;
 
     if (bitPos > 7) {
       if (parity) {
-        TX_0();
+        tx_zero();
       } else {
-        TX_1();
+        tx_one();
       }
       
       bytePos++;
@@ -343,15 +371,10 @@ void Emulator::transmit(const uint8_t *buf, uint8_t count) {
     }
   } while (count);
 
-
   // send EoF
-  waitForBitTimer();
-  TX_OFF();
-
-  PORTB.OUTCLR = _BV(PIN3);
+  tx_eof();
 }
 
-static const uint8_t ATQA[2] = {0x44, 0x00};
 static const uint8_t SLP_REQ[2] = {0x50, 0x00};
 static const uint8_t SAK_NC[3] = {0x04, 0xDA, 0x17}; //Select acknowledge uid not complete
 static const uint8_t SAK_C[3] = {0x00, 0xFE, 0x51}; //Select acknowledge uid complete, Type 2 (PICC not compliant to ISO/IEC 14443-4)
