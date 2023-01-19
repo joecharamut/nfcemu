@@ -99,6 +99,25 @@ static void TCA0_setup() {
   TCA0.SPLIT.CTRLA = TCA_SPLIT_CLKSEL_DIV1_gc | TCA_SPLIT_ENABLE_bm;
 }
 
+static volatile uint8_t bitCounter asm("bitCounter");
+ISR(TCA0_LUNF_vect, ISR_NAKED) {
+  asm volatile (
+    "push r23\n\t"
+    "in r23, __SREG__\n\t"
+    "push r23\n\t"
+    "lds r23, bitCounter\n\t"
+    "subi r23, 0xFF\n\t"
+    "sts bitCounter, r23\n\t"
+    "pop r23\n\t"
+    "out __SREG__, r23\n\t"
+    "pop r23\n\t"
+    "reti\n\t"
+    : 
+    : 
+    : "memory"
+  );
+}
+
 /**
  * Setup TCB0 to capture when the comparator detects a falling edge (for modified miller decoding)
 */
