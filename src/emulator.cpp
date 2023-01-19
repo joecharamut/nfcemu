@@ -34,7 +34,7 @@ static constexpr uint32_t NFC_BITPERIOD = NFC_CARRIER / 128UL;
 
 // for TCA0
 static constexpr uint8_t SUBCARRIER_PER = (((F_CPU/1) + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER);
-static constexpr uint8_t SUBCARRIER_CMP = ((SUBCARRIER_PER / 2) - 1);
+static constexpr uint8_t SUBCARRIER_CMP = ((SUBCARRIER_PER / 2));
 static constexpr uint8_t BITTIMEOUT_PER = (((F_CPU/1) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
 static constexpr uint8_t HALF_BIT_TIMEOUT_PER = (BITTIMEOUT_PER/2);
 
@@ -124,8 +124,8 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   TCA0_setup();
   TCB0_setup();
 
-  PORTA.DIRSET = _BV(PIN1);
-  PORTB.DIRSET = _BV(PIN3);
+  PORTA.DIRSET = _BV(PIN1) | _BV(PIN2);
+  // PORTB.DIRSET = _BV(PIN3);
 }
 
 void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
@@ -162,13 +162,13 @@ static inline void resetBitTimeout() {
 /// @return number of bytes successfully received
 uint8_t Emulator::receive() {
   // wait for start of message (TCB0 interrupt) for bd * (2^n)
-  uint8_t timeout_cnt = 0;
+  uint8_t timeouts = 0;
   resetBitTimeout();
   while (!RX_EDGE_FLAG) {
-    // if timeout return no data
     if (BIT_TIMEOUT_FLAG) {
-      if (++timeout_cnt >= 6) break;
-      resetBitTimeout();
+      // if timeout return no data
+      if (++timeouts >= 6) return 0;
+      TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
     }
   }
 
@@ -250,6 +250,7 @@ uint8_t Emulator::receive() {
    * so according to the nfc forum 0 bit frames are valid but i'm going to ignore them
    * unfortunetly the nfc forum decided that they only feel like issuing 4 bit responses
    * for type-2 tags so this is a compromise
+   * TODO: AAAAAAAAAAAAA FINE I GUESS ITS TIME TO DO 1 BIT FRAMES (collision resolution piss)
    */
   if (bitPos >= 4) {
     bytePos++;
@@ -279,13 +280,13 @@ static inline void waitNBitPeriods(uint8_t n) {
 /// @brief Output waveform on PA4 for load modulation
 static inline void tx_high() {
   // reset waveform timer
-  TCA0.SPLIT.HCNT = HALF_BIT_TIMEOUT_PER;
+  TCA0.SPLIT.HCNT = 0;
   // enable output
   // PORTA.DIRSET = _BV(PIN4);
   VPORTA.DIR |= _BV(PIN4);
 
   // debug
-  // PORTA.OUTSET = _BV(PIN1);
+  VPORTA.OUT |= _BV(PIN1);
   // PORTB.OUTTGL = _BV(PIN3);
 }
 
@@ -296,7 +297,7 @@ static inline void tx_low() {
   VPORTA.DIR &= ~_BV(PIN4);
 
   // debug
-  // PORTA.OUTCLR = _BV(PIN1);
+  VPORTA.OUT &= ~_BV(PIN1);
   // PORTB.OUTTGL = _BV(PIN3);
 }
 
@@ -328,13 +329,13 @@ static inline void tx_eof() {
   waitForBitTimer();
 }
 
-void Emulator::transmit(const uint8_t *buf, uint8_t count) {
+void Emulator::transmit(const uint8_t *buf, uint8_t count, uint8_t skipBits = 0) {
   uint8_t bytePos = 0;
-  uint8_t bitPos = 0;
+  uint8_t bitPos = skipBits;
   uint8_t parity = 0;
 
   // TODO: wait correct delay before transmit
-  waitNBitPeriods(6);
+  waitNBitPeriods(4);
   
   // setup bit timer to wait for half bit period (oops)
   TCA0.SPLIT.LPER = HALF_BIT_TIMEOUT_PER;
@@ -376,8 +377,8 @@ void Emulator::transmit(const uint8_t *buf, uint8_t count) {
 }
 
 static const uint8_t SLP_REQ[2] = {0x50, 0x00};
-static const uint8_t SAK_NC[3] = {0x04, 0xDA, 0x17}; //Select acknowledge uid not complete
-static const uint8_t SAK_C[3] = {0x00, 0xFE, 0x51}; //Select acknowledge uid complete, Type 2 (PICC not compliant to ISO/IEC 14443-4)
+static const uint8_t SEL_RES_INCOMPLETE[3] = {0x04, 0xDA, 0x17};
+static const uint8_t SEL_RES_COMPLETE[3] = {0x00, 0xFE, 0x51};
 
 static const uint8_t SENS_RES[3][2] = {
   { 0b00000100, 0b00000000 }, // SEL_RES CL1 ( 4 UID bytes)
@@ -385,10 +386,8 @@ static const uint8_t SENS_RES[3][2] = {
   { 0b10000100, 0b00000000 }, // SEL_RES CL3 (10 UID bytes)
 };
 
-void Emulator::handleShortFrame() {
-  NfcA::ShortFrame *fr = (NfcA::ShortFrame *)buffer;
-
-  if (fr->command == NfcA::ShortCommand::SENS_REQ || fr->command == NfcA::ShortCommand::ALL_REQ) {
+void Emulator::idleState(uint8_t read) {
+  if (read == 1 && (buffer[0] == NfcA::SENS_REQ || buffer[0] == NfcA::ALL_REQ)) {
     if (uidSize == 4) {
       transmit(SENS_RES[0], 2);
     } else if (uidSize == 7) {
@@ -396,64 +395,109 @@ void Emulator::handleShortFrame() {
     } else if (uidSize == 10) {
       transmit(SENS_RES[2], 2);
     }
+
+    state = ST_READY;
   }
 }
 
-void Emulator::handleSDDFrame() {
-  NfcA::SDDFrame *fr = (NfcA::SDDFrame *)buffer;
-  
-  if (fr->command == NfcA::SDDCommand::SDD_REQ && fr->byteCount == 2 && fr->bitCount == 0) {
-    uint8_t col_idx = fr->collisionLevel / 2 - 1;
-    NfcA::genSddResponse(uid, uidSize, col_idx, buffer);
-    transmit(buffer, 5);
-  }
-}
-
-void Emulator::handleStandardFrame(uint8_t read) {
-  NfcA::SDDFrame *fr = (NfcA::SDDFrame *)buffer;
-
-  // TODO: check crc value?
-  if (buffer[0] == SLP_REQ[0] && buffer[1] == SLP_REQ[1]) {
-    // SLP_REQ: do nothing / TODO: put device into idle state
-  } else if (read == 7 && fr->command == NfcA::SDDCommand::SDD_REQ && fr->byteCount == 7 && fr->bitCount == 0) {
-    // SEL_REQ
-    uint8_t col_idx = fr->collisionLevel / 2 - 1;
-    uint8_t *uid_buf = fr->data + 5;
-
-    NfcA::genSddResponse(uid, uidSize, col_idx, uid_buf);
-    if (memcmp(fr->data, uid_buf, 5) == 0) {
-      buffer[0] = 0x00;
-      if (uid_buf[0] == 0x88) {
-        buffer[0] |= 0b00000100;
-      }
-      CRC::appendCrc16A(buffer, 1);
-      transmit(buffer, 3);
+void Emulator::sleepState(uint8_t read) {
+  if (read == 1 && buffer[0] == NfcA::ALL_REQ) {
+    if (uidSize == 4) {
+      transmit(SENS_RES[0], 2);
+    } else if (uidSize == 7) {
+      transmit(SENS_RES[1], 2);
+    } else if (uidSize == 10) {
+      transmit(SENS_RES[2], 2);
     }
+
+    state = ST_READY;
   }
-  
-  
-  else {
-    Serial.hexdump(buffer, read);
+}
+
+void Emulator::readyState(uint8_t read) {
+  NfcA::SDDFrame *fr = (NfcA::SDDFrame *)buffer;
+
+  // TODO: not really correct
+  if (read == 4 && buffer[0] == 0x50 && buffer[1] == 0x00) {
+    state = ST_SLEEP;
+    return;
   }
+
+  // if recieve unexpected frame type, return to IDLE state.
+  if (fr->command != NfcA::SDDCommand::SDD_REQ) {
+    state = ST_IDLE;
+    return;
+  }
+
+  // get which collision level the command wants
+  uint8_t col_idx = fr->collisionLevel / 2 - 1;
+  // SDD_REQ is at most 7 bytes, use space after as work area
+  uint8_t *nfcid_buf = buffer+8;
+  // calculate sdd compare bytes
+  NfcA::genSddResponse(uid, uidSize, col_idx, nfcid_buf);
+
+  if (fr->byteCount == 2 && fr->bitCount == 0) {
+    // Poll device sent 16 bits (2b+0), expects 40 bits (5b+0) back
+    // this is the basic SDD_REQ command to return the whole UID part
+    transmit(nfcid_buf, 5);
+  } else if (fr->byteCount == 7 && fr->bitCount == 0) {
+    // SEL_REQ command defined as having 0x70 as second byte (56 bits / 7b+0)
+    // check if the id matches expected value
+    if (memcmp(nfcid_buf, fr->data, 5) == 0) {
+      // if matching, send select acknowledge
+      if (
+        (col_idx == 0 && uidSize ==  4) ||
+        (col_idx == 1 && uidSize ==  7) ||
+        (col_idx == 2 && uidSize == 10) 
+      ) {
+        transmit(SEL_RES_COMPLETE, 3);
+        // after being selected, now in ACTIVE state ready to handle type-2 tag commands
+        state = ST_ACTIVE;
+      } else {
+        // still need to select next id part
+        transmit(SEL_RES_INCOMPLETE, 3);
+      }
+    }
+  } else {
+    // If some amount of bits between 16 and 56, this is a collision resolution frame.
+    // In this case, we need to compare the first n bits of our UID with the UID recieved and reply with the rest
+    // TODO: impl. this
+    uint8_t uidByte = fr->byteCount - 2;
+    uint8_t uidBit = fr->bitCount;
+    transmit(nfcid_buf, 5, uidBit);
+  }
+}
+
+void Emulator::activeState(uint8_t read) {
+
 }
 
 void Emulator::waitForReader() {
   uint8_t read;
+  uint8_t timeout = 0;
+  state = ST_IDLE;
+
   do {
     read = receive();
 
     if (read) {
+      timeout = 0;
       // Serial.hexdump(buffer, read);
 
-      if (read == 1) {
-        handleShortFrame();
-      } else if (read == 2) {
-        handleSDDFrame();
-      } else {
-        handleStandardFrame(read);
+      switch (state) {
+        case ST_IDLE: idleState(read); break;
+        case ST_SLEEP: sleepState(read); break;
+        case ST_READY: readyState(read); break;
+        case ST_ACTIVE: activeState(read); break;
+        default: 
+          Serial.print("!!! INVALID STATE !!!\n");
+          while (1);
+          break;
       }
 
-      resetBitTimeout();
+      // resetBitTimeout();
+    } else {
+      timeout++;
     }
-  } while (1);
+  } while (timeout < 0xFF);
 }

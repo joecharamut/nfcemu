@@ -14,53 +14,50 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ***********************************************************************/
-
 #pragma once
-#include <avr/io.h>
 
+#include <stdint.h>
 #define __packed __attribute__((packed))
 
-namespace NfcEmu {
+namespace NTAG21x {
 
-enum ST_ENUM {
-  ST_IDLE,
-  ST_READY,
-  ST_ACTIVE,
-  ST_SLEEP,
-
-  ST_MAX = 0xff,
+enum __packed Command {
+  GET_VERSION = 0x60,
+  READ = 0x30,
+  FAST_READ = 0x3A,
+  WRITE = 0xA2,
+  COMP_WRITE = 0xA0,
+  READ_CNT = 0x39,
+  PWD_AUTH = 0x1B,
+  READ_SIG = 0x3C,
 };
-typedef uint8_t emu_state_t;
+static_assert(sizeof(Command) == 1);
 
-class Emulator {
-public:
-  void setup(uint8_t *storage, uint16_t storageSize);
-  void waitForReader();
-
-  void setUid(uint8_t *uid, uint8_t uidSize);
-
-  explicit Emulator();
-  Emulator(Emulator const &) = delete;
-  void operator=(Emulator) = delete;
-
-  uint8_t receive();
-  void transmit(const uint8_t *buf, uint8_t count, uint8_t skipBits = 0);
-
-private:
-  emu_state_t state = ST_IDLE;
-
-  uint8_t *storage;
-  uint16_t storageSize;
-
-  uint8_t *uid;
-  uint8_t uidSize;
-
-  uint8_t buffer[64];
-
-  void idleState(uint8_t read);
-  void sleepState(uint8_t read);
-  void readyState(uint8_t read);
-  void activeState(uint8_t read);
+enum __packed ACK {
+  Acknowledge = 0xA,
 };
+static_assert(sizeof(ACK) == 1);
+
+enum __packed NACK {
+  InvalidArgument = 0x0,
+  ParityError = 0x1,
+  InvalidAuthCounter = 0x4,
+  WriteError = 0x5,
+};
+static_assert(sizeof(NACK) == 1);
+
+struct __packed VersionInfo {
+  uint8_t header;
+  uint8_t vendorId;
+  uint8_t productType;
+  uint8_t productSubtype;
+  uint8_t productMajorVersion;
+  uint8_t productMinorVersion;
+  uint8_t storageSize;
+  uint8_t protocolType;
+};
+static_assert(sizeof(VersionInfo) == 8);
+
+
 
 };
