@@ -68,7 +68,7 @@ uint8_t tagStorage[] = {
   'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd', '!',
 };
 
-uint8_t tagUid[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
+uint8_t tagUid[] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD};
             
 //Byte 14 (value=0x80=1024/8) specifies tag size in bytes divided by 8
 //Byte 18, 19 specify NDEF-Message size, Byte 20..35 is NDEF-header, content starts at Byte 36

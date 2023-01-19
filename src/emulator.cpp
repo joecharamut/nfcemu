@@ -33,7 +33,7 @@ static constexpr uint32_t NFC_SUBCARRIER = NFC_CARRIER / 16UL;
 static constexpr uint32_t NFC_BITPERIOD = NFC_CARRIER / 128UL;
 
 // for TCA0
-static constexpr uint8_t SUBCARRIER_PER = (((F_CPU/1) + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER);
+static constexpr uint8_t SUBCARRIER_PER = (((F_CPU + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER));
 static constexpr uint8_t SUBCARRIER_CMP = ((SUBCARRIER_PER / 2));
 static constexpr uint8_t BITTIMEOUT_PER = (((F_CPU/1) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
 static constexpr uint8_t HALF_BIT_TIMEOUT_PER = (BITTIMEOUT_PER/2);
@@ -88,7 +88,7 @@ static void TCA0_setup() {
   // enable comparator 1 high (WO4/PA4/PIN2)
   TCA0.SPLIT.CTRLB = TCA_SPLIT_HCMP1EN_bm;
   // set waveform period
-  TCA0.SPLIT.HPER = SUBCARRIER_PER;
+  TCA0.SPLIT.HPER = SUBCARRIER_PER-1;
   // set duty cycle
   TCA0.SPLIT.HCMP1 = SUBCARRIER_CMP;
 
@@ -125,7 +125,7 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   TCB0_setup();
 
   PORTA.DIRSET = _BV(PIN1) | _BV(PIN2);
-  // PORTB.DIRSET = _BV(PIN3);
+  PORTB.DIRSET = _BV(PIN3);
 }
 
 void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
@@ -162,12 +162,13 @@ static inline void resetBitTimeout() {
 /// @return number of bytes successfully received
 uint8_t Emulator::receive() {
   // wait for start of message (TCB0 interrupt) for bd * (2^n)
-  uint8_t timeouts = 0;
+  uint8_t timeouts = 6;
   resetBitTimeout();
   while (!RX_EDGE_FLAG) {
     if (BIT_TIMEOUT_FLAG) {
       // if timeout return no data
-      if (++timeouts >= 6) return 0;
+      if (!timeouts) return 0;
+      timeouts--;
       TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
     }
   }
@@ -287,7 +288,7 @@ static inline void tx_high() {
 
   // debug
   VPORTA.OUT |= _BV(PIN1);
-  // PORTB.OUTTGL = _BV(PIN3);
+  // PORTA.OUTTGL = _BV(PIN2);
 }
 
 /// @brief Stop outputting waveform on PA4 for load modulation
@@ -298,7 +299,7 @@ static inline void tx_low() {
 
   // debug
   VPORTA.OUT &= ~_BV(PIN1);
-  // PORTB.OUTTGL = _BV(PIN3);
+  // PORTA.OUTTGL = _BV(PIN2);
 }
 
 /// @brief Transmit a one bit (high->low after 1/2bd)
@@ -462,9 +463,27 @@ void Emulator::readyState(uint8_t read) {
     // If some amount of bits between 16 and 56, this is a collision resolution frame.
     // In this case, we need to compare the first n bits of our UID with the UID recieved and reply with the rest
     // TODO: impl. this
-    uint8_t uidByte = fr->byteCount - 2;
-    uint8_t uidBit = fr->bitCount;
-    transmit(nfcid_buf, 5, uidBit);
+    uint8_t uidBytes = fr->byteCount - 2;
+    uint8_t uidBits = fr->bitCount;
+
+    // match uid bits first
+    if (uidBits) {
+      uint8_t mask = (1 << uidBits) - 1;
+      if ((nfcid_buf[uidBytes] & mask) != (fr->data[uidBytes] & mask)) {
+        state = ST_IDLE;
+        return;
+      }
+    }
+
+    // TODO: also check uid bytes if present
+    // while (uidBytes--) {
+    //   if (nfcid_buf[uidBytes] != fr->data[uidBytes]) {
+    //     state = ST_IDLE;
+    //     return;
+    //   }
+    // }
+    
+    transmit(nfcid_buf, 5, uidBits);
   }
 }
 
