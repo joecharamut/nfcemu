@@ -79,7 +79,7 @@ int main() {
   // disable clock prescaler (use 20MHz clock)
   _PROTECTED_WRITE(CLKCTRL.MCLKCTRLB, 0x00);
   // set use extclk
-  _PROTECTED_WRITE(CLKCTRL.MCLKCTRLA, CLKCTRL_CLKSEL_EXTCLK_gc);
+  // _PROTECTED_WRITE(CLKCTRL.MCLKCTRLA, CLKCTRL_CLKSEL_EXTCLK_gc);
 
   Serial.begin();
   Serial.print("Hello world\n");

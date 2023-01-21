@@ -33,7 +33,7 @@ static constexpr uint32_t NFC_SUBCARRIER = NFC_CARRIER / 16UL;
 static constexpr uint32_t NFC_BITPERIOD = NFC_CARRIER / 128UL;
 
 // for TCA0
-static constexpr uint8_t SUBCARRIER_PER = (((F_CPU + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER));
+static constexpr uint8_t SUBCARRIER_PER = (((F_CPU + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER) - 0.5);
 static constexpr uint8_t SUBCARRIER_CMP = ((SUBCARRIER_PER / 2));
 static constexpr uint8_t BITTIMEOUT_PER = (((F_CPU/1) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
 static constexpr uint8_t HALF_BIT_TIMEOUT_PER = (BITTIMEOUT_PER/2);
@@ -97,25 +97,9 @@ static void TCA0_setup() {
 
   // set divider to CLK/2 and enable
   TCA0.SPLIT.CTRLA = TCA_SPLIT_CLKSEL_DIV1_gc | TCA_SPLIT_ENABLE_bm;
-}
 
-static volatile uint8_t bitCounter asm("bitCounter");
-ISR(TCA0_LUNF_vect, ISR_NAKED) {
-  asm volatile (
-    "push r23\n\t"
-    "in r23, __SREG__\n\t"
-    "push r23\n\t"
-    "lds r23, bitCounter\n\t"
-    "subi r23, 0xFF\n\t"
-    "sts bitCounter, r23\n\t"
-    "pop r23\n\t"
-    "out __SREG__, r23\n\t"
-    "pop r23\n\t"
-    "reti\n\t"
-    : 
-    : 
-    : "memory"
-  );
+  // PORTA.DIRSET = _BV(PIN4);
+  // while (1);
 }
 
 /**
@@ -143,8 +127,8 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   TCA0_setup();
   TCB0_setup();
 
-  PORTA.DIRSET = _BV(PIN1) | _BV(PIN2);
-  PORTB.DIRSET = _BV(PIN3);
+  PORTA.DIRSET = _BV(PIN1);// | _BV(PIN2);
+  // PORTB.DIRSET = _BV(PIN3);
 }
 
 void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
