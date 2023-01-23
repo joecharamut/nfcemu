@@ -24,6 +24,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <util/delay.h>
 #include <string.h>
 #include <avr/interrupt.h>
+#include <util/delay_basic.h>
+
+#define force_inline inline __attribute__((always_inline))
 
 using namespace NfcEmu;
 
@@ -31,15 +34,17 @@ using namespace NfcEmu;
 static constexpr uint32_t NFC_CARRIER = 13560000UL;
 static constexpr uint32_t NFC_SUBCARRIER = NFC_CARRIER / 16UL;
 static constexpr uint32_t NFC_BITPERIOD = NFC_CARRIER / 128UL;
+static constexpr uint32_t NFC_HBITPERIOD = NFC_BITPERIOD * 2UL;
 
 // for TCA0
-static constexpr uint8_t SUBCARRIER_PER = (((F_CPU + (NFC_SUBCARRIER * 0.5)) / NFC_SUBCARRIER) - 0.5);
-static constexpr uint8_t SUBCARRIER_CMP = ((SUBCARRIER_PER / 2));
-static constexpr uint8_t BITTIMEOUT_PER = (((F_CPU/1) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
-static constexpr uint8_t HALF_BIT_TIMEOUT_PER = (BITTIMEOUT_PER/2);
+static constexpr uint8_t TCA0_DIVISOR = 2;
+static constexpr uint8_t SUBCARRIER_PER = ((((F_CPU/TCA0_DIVISOR)) / NFC_SUBCARRIER) + 0.5);
+static constexpr uint8_t BITTIMEOUT_PER = ((((F_CPU/TCA0_DIVISOR)) / NFC_BITPERIOD) + 0.5);
+static constexpr uint8_t HALFBIT_PER    = ((((F_CPU/TCA0_DIVISOR)) / NFC_HBITPERIOD) + 0.5);
+static constexpr uint8_t HALFBIT_TIMER  = ((((F_CPU)) / NFC_HBITPERIOD)/3.5);
 
 // for TCB0
-static constexpr uint16_t BITPERIOD_PER = (((F_CPU) + (NFC_BITPERIOD * 0.5)) / NFC_BITPERIOD);
+static constexpr uint16_t BITPERIOD_PER = (((F_CPU)) / NFC_BITPERIOD);
 static constexpr uint16_t BITPERIOD_1_0 = (BITPERIOD_PER * 1.0);
 static constexpr uint16_t BITPERIOD_1_5 = (BITPERIOD_PER * 1.5);
 static constexpr uint16_t BITPERIOD_2_0 = (BITPERIOD_PER * 2.0);
@@ -89,17 +94,16 @@ static void TCA0_setup() {
   TCA0.SPLIT.CTRLB = TCA_SPLIT_HCMP1EN_bm;
   // set waveform period
   TCA0.SPLIT.HPER = SUBCARRIER_PER-1;
-  // set duty cycle
-  TCA0.SPLIT.HCMP1 = SUBCARRIER_CMP;
+  // set 50% duty cycle
+  TCA0.SPLIT.HCMP1 = (SUBCARRIER_PER/2);
 
   // setup TCA0 low as a timeout counter 
   TCA0.SPLIT.LPER = BITTIMEOUT_PER;
 
   // set divider to CLK/2 and enable
-  TCA0.SPLIT.CTRLA = TCA_SPLIT_CLKSEL_DIV1_gc | TCA_SPLIT_ENABLE_bm;
+  TCA0.SPLIT.CTRLA = TCA_SPLIT_CLKSEL_DIV2_gc | TCA_SPLIT_ENABLE_bm;
 
   // PORTA.DIRSET = _BV(PIN4);
-  // while (1);
 }
 
 /**
@@ -127,8 +131,8 @@ void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   TCA0_setup();
   TCB0_setup();
 
-  PORTA.DIRSET = _BV(PIN1);// | _BV(PIN2);
-  // PORTB.DIRSET = _BV(PIN3);
+  // FIXME: for manchester debug output
+  PORTA.DIRSET = _BV(PIN1);
 }
 
 void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
@@ -164,21 +168,20 @@ static inline void resetBitTimeout() {
 /// @ref Protocol info referenced from https://github.com/sigrokproject/libsigrokdecode/blob/master/decoders/miller/pd.py
 /// @return number of bytes successfully received
 uint8_t Emulator::receive() {
-  // wait for start of message (TCB0 interrupt) for bd * (2^n)
-  uint8_t timeouts = 6;
+  TCA0.SPLIT.LPER = HALFBIT_PER;
+
+  uint8_t timeouts = 0;
   resetBitTimeout();
+
+  // wait for falling edge / start of frame
   while (!RX_EDGE_FLAG) {
     if (BIT_TIMEOUT_FLAG) {
-      // if timeout return no data
-      if (!timeouts) return 0;
-      timeouts--;
       TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
+      // if timeout return no data
+      if (timeouts > 8) return 0;
+      timeouts++;
     }
   }
-
-  // set timeout
-  TCA0.SPLIT.LPER = 0xFF;
-  resetBitTimeout();
 
   uint16_t delta = RX_EDGE_TIME;
   uint8_t bitPos = 0;
@@ -186,18 +189,28 @@ uint8_t Emulator::receive() {
   uint8_t lastBit = 0;
   buffer[0] = 0;
 
+  // expecting odd parity bit, start at 1; (0 has an even # of ones)
+  uint8_t parity = 1;
+
   // macro to handle checking whether it's the next byte, 
   //  skipping the parity bit, and writing in the data
   #define BIT(b) do {                   \
     if (bitPos == 8) {                  \
       /* parity bit */                  \
+      if ((b) != parity) {              \
+        Serial.print("#P");             \
+        for (uint8_t i = 0; i <= bytePos; i++) Serial.printHex(buffer[i]); \
+        return 0;                       \
+      }                                 \
+      parity = 1;                       \
       bitPos = 0;                       \
       bytePos++;                        \
-      if (bitPos >= sizeof(buffer)) {   \
+      if (bytePos >= sizeof(buffer)) {  \
         return bytePos;                 \
       }                                 \
       buffer[bytePos] = 0;              \
     } else {                            \
+      parity ^= (b);                    \
       buffer[bytePos] |= ((b)<<bitPos); \
       bitPos++;                         \
     }                                   \
@@ -242,9 +255,14 @@ uint8_t Emulator::receive() {
         }
       }
 
-      resetBitTimeout();
+      timeouts = 8;
     }
-  } while (!BIT_TIMEOUT_FLAG);
+
+    if (BIT_TIMEOUT_FLAG) {
+      timeouts--;
+      TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
+    }
+  } while (timeouts);
   
   /**
    * A short frame is used to initiate communication and consists of the following:
@@ -266,7 +284,7 @@ uint8_t Emulator::receive() {
 }
 
 static inline void waitForBitTimer() {
-  while (!BIT_TIMEOUT_FLAG);
+  loop_until_bit_is_set(TCA0.SPLIT.INTFLAGS, TCA_SPLIT_LUNF_bp);
   TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
 }
 
@@ -282,7 +300,7 @@ static inline void waitNBitPeriods(uint8_t n) {
 }
 
 /// @brief Output waveform on PA4 for load modulation
-static inline void tx_high() {
+static force_inline void tx_high() {
   // reset waveform timer
   TCA0.SPLIT.HCNT = 0;
   // enable output
@@ -295,7 +313,7 @@ static inline void tx_high() {
 }
 
 /// @brief Stop outputting waveform on PA4 for load modulation
-static inline void tx_low() {
+static force_inline void tx_low() {
   // disable output
   // PORTA.DIRCLR = _BV(PIN4);
   VPORTA.DIR &= ~_BV(PIN4);
@@ -342,11 +360,9 @@ void Emulator::transmit(const uint8_t *buf, uint8_t count, uint8_t skipBits = 0)
   waitNBitPeriods(4);
   
   // setup bit timer to wait for half bit period (oops)
-  TCA0.SPLIT.LPER = HALF_BIT_TIMEOUT_PER;
-  // reset count
-  TCA0.SPLIT.LCNT = HALF_BIT_TIMEOUT_PER;
+  TCA0.SPLIT.LPER = HALFBIT_PER;
   waitForBitTimer();
-  waitForBitTimer();
+  // waitForBitTimer();
 
   // send SoF
   tx_sof();
@@ -421,15 +437,20 @@ void Emulator::sleepState(uint8_t read) {
 void Emulator::readyState(uint8_t read) {
   NfcA::SDDFrame *fr = (NfcA::SDDFrame *)buffer;
 
+  // Serial.print(read);
+
   // TODO: not really correct
   if (read == 4 && buffer[0] == 0x50 && buffer[1] == 0x00) {
     state = ST_SLEEP;
+    // Serial.print("Z");
     return;
   }
 
   // if recieve unexpected frame type, return to IDLE state.
   if (fr->command != NfcA::SDDCommand::SDD_REQ) {
     state = ST_IDLE;
+    Serial.print("#");
+    for (uint8_t i = 0; i < read; i++) Serial.printHex(buffer[i]);
     return;
   }
 
@@ -486,7 +507,7 @@ void Emulator::readyState(uint8_t read) {
     //   }
     // }
     
-    transmit(nfcid_buf, 5, uidBits);
+    transmit(nfcid_buf+uidBytes, 5-uidBytes, uidBits);
   }
 }
 
