@@ -81,7 +81,7 @@ int main() {
   // set use extclk
   // _PROTECTED_WRITE(CLKCTRL.MCLKCTRLA, CLKCTRL_CLKSEL_EXTCLK_gc);
 
-  Serial.begin();
+  Serial.begin();  
   Serial.print("Hello world\n");
 
   emu.setup(tagStorage, sizeof(tagStorage));

@@ -44,10 +44,11 @@ static constexpr uint8_t HALFBIT_PER    = ((((F_CPU/TCA0_DIVISOR)) / NFC_HBITPER
 static constexpr uint8_t HALFBIT_TIMER  = ((((F_CPU)) / NFC_HBITPERIOD)/3.5);
 
 // for TCB0
+static constexpr uint16_t BITPERIOD_MSK = 0b1111111111111110;
 static constexpr uint16_t BITPERIOD_PER = (((F_CPU)) / NFC_BITPERIOD);
-static constexpr uint16_t BITPERIOD_1_0 = (BITPERIOD_PER * 1.0);
-static constexpr uint16_t BITPERIOD_1_5 = (BITPERIOD_PER * 1.5);
-static constexpr uint16_t BITPERIOD_2_0 = (BITPERIOD_PER * 2.0);
+static constexpr uint16_t N_BITPERIODS(float n) {
+  return ((uint16_t)(BITPERIOD_PER * n)) & BITPERIOD_MSK;
+}
 
 Emulator::Emulator() {}
 
@@ -122,6 +123,34 @@ static void TCB0_setup() {
   // set divider to CLK/1 and enable
   TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
 }
+
+static void RTC_setup() {
+  loop_until_bit_is_clear(RTC.STATUS, RTC_CMPBUSY_bp);
+
+  // use internal 32.768KHz oscillator
+  RTC.CLKSEL = RTC_CLKSEL_INT32K_gc;
+
+  // set ~12 ms period
+  loop_until_bit_is_clear(RTC.STATUS, RTC_PERBUSY_bp);
+  RTC.PER = 100;
+
+  // set clock divider to CLK_RTC/4 (~0.1221 ms per tick) and enable
+  loop_until_bit_is_clear(RTC.STATUS, RTC_CTRLABUSY_bp); // wait for RTC to not be busy (needed?)
+  RTC.CTRLA = RTC_PRESCALER_DIV4_gc | RTC_RTCEN_bm;
+}
+
+static inline void RTC_set_timeout(uint16_t per) {
+  loop_until_bit_is_clear(RTC.STATUS, RTC_PERBUSY_bp);
+  RTC.PER = per;
+}
+
+static inline void RTC_reset_count() {
+  loop_until_bit_is_clear(RTC.STATUS, RTC_CNTBUSY_bp);
+  RTC.CNT = 0;
+  RTC_INTFLAGS |= RTC_OVF_bm;
+}
+
+#define RTC_TIMEOUT_FLAG (RTC.INTFLAGS & RTC_OVF_bm)
 
 void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   this->storage = storage;
@@ -218,14 +247,14 @@ uint8_t Emulator::receive() {
 
   do {
     if (RX_EDGE_FLAG) {
-      delta = RX_EDGE_TIME;
+      delta = RX_EDGE_TIME & BITPERIOD_MSK;
 
       if (lastBit == 0) {
         // space->???
-        if (delta <= BITPERIOD_1_0) {
+        if (delta <= N_BITPERIODS(1.0)) {
           // 1.0 time between bits = space
           BIT(0);
-        } else if (delta <= BITPERIOD_1_5) {
+        } else if (delta <= N_BITPERIODS(1.5)) {
           // 1.5 time = mark
           BIT(1);
           lastBit = 1;
@@ -236,15 +265,15 @@ uint8_t Emulator::receive() {
         }
       } else {
         // mark->???
-        if (delta <= BITPERIOD_1_0) {
+        if (delta <= N_BITPERIODS(1.0)) {
           // 1.0 time = mark
           BIT(1);
-        } else if (delta <= BITPERIOD_1_5) {
+        } else if (delta <= N_BITPERIODS(1.5)) {
           // 1.5 time = 2 spaces
           BIT(0);
           BIT(0);
           lastBit = 0;
-        } else if (delta <= BITPERIOD_2_0) {
+        } else if (delta <= N_BITPERIODS(2.0)) {
           // 2.0 time = space, mark
           BIT(0);
           BIT(1);
