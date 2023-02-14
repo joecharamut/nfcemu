@@ -18,32 +18,37 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #pragma once
 
 #include <stdint.h>
+#include "impl/common.h"
+
+#ifndef NFC_PHY_BUF_SIZE
+#define NFC_PHY_BUF_SIZE 64
+#endif
 
 namespace NfcA {
-  typedef void (*rx_fnptr_t)(uint8_t);
 
 /// @brief Physical layer implementation for data transmission
-class Phy {
+class Phy : public PhyInterface {
 public:
-  explicit Phy();
-  Phy(Phy const &) = delete;
-  void operator=(Phy) = delete;
-  
-  void onReceive(rx_fnptr_t fn);
   void begin();
 
   void transmit(const uint8_t *buf, uint8_t count, uint8_t skipBits = 0);
   uint8_t receive();
 
+  void onReceive(PhyReceiveFnPtr fn);
+  uint8_t read();
+  uint8_t *getBuffer();
+
   uint8_t available();
   uint8_t bitsAvailable();
 
 private:
-  rx_fnptr_t receiveCallback;
+  PhyReceiveFnPtr receiveCallback;
 
   uint8_t bytePos;
   uint8_t bitPos;
-  uint8_t buffer[64];
+
+  uint8_t readPtr;
+  uint8_t buffer[NFC_PHY_BUF_SIZE];
 
   
 

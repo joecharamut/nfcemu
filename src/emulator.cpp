@@ -1,5 +1,5 @@
 /***********************************************************************
-Copyright (C) 2022 Joseph Charamut
+Copyright (C) 2022-2023 Joseph Charamut
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -31,6 +31,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using namespace NfcEmu;
 
+void Emulator::setUid(uint8_t *uid, uint8_t uidSize) {
+  this->uid = uid;
+  this->uidSize = uidSize;
+}
 
 static const uint8_t SLP_REQ[2] = {0x50, 0x00};
 static const uint8_t SEL_RES_INCOMPLETE[3] = {0x04, 0xDA, 0x17};
@@ -43,35 +47,41 @@ static const uint8_t SENS_RES[3][2] = {
 };
 
 void Emulator::idleState(uint8_t read) {
-  if (read == 1 && (buffer[0] == NfcA::SENS_REQ || buffer[0] == NfcA::ALL_REQ)) {
-    if (uidSize == 4) {
-      NfcA::PHY.transmit(SENS_RES[0], 2);
-    } else if (uidSize == 7) {
-      NfcA::PHY.transmit(SENS_RES[1], 2);
-    } else if (uidSize == 10) {
-      NfcA::PHY.transmit(SENS_RES[2], 2);
-    }
+  if (read == 1) {
+    uint8_t cmd = phy.read();
+    if (cmd == NfcA::SENS_REQ || cmd == NfcA::ALL_REQ) {
+      if (uidSize == 4) {
+        phy.transmit(SENS_RES[0], 2);
+      } else if (uidSize == 7) {
+        phy.transmit(SENS_RES[1], 2);
+      } else if (uidSize == 10) {
+        phy.transmit(SENS_RES[2], 2);
+      }
 
-    state = ST_READY;
+      state = ST_READY;
+    }
   }
 }
 
 void Emulator::sleepState(uint8_t read) {
-  if (read == 1 && buffer[0] == NfcA::ALL_REQ) {
-    if (uidSize == 4) {
-      NfcA::PHY.transmit(SENS_RES[0], 2);
-    } else if (uidSize == 7) {
-      NfcA::PHY.transmit(SENS_RES[1], 2);
-    } else if (uidSize == 10) {
-      NfcA::PHY.transmit(SENS_RES[2], 2);
-    }
+  if (read == 1) {
+    uint8_t cmd = phy.read();
+    if (cmd == NfcA::ALL_REQ) {
+      if (uidSize == 4) {
+        phy.transmit(SENS_RES[0], 2);
+      } else if (uidSize == 7) {
+        phy.transmit(SENS_RES[1], 2);
+      } else if (uidSize == 10) {
+        phy.transmit(SENS_RES[2], 2);
+      }
 
-    state = ST_READY;
+      state = ST_READY;
+    }
   }
 }
 
 void Emulator::readyState(uint8_t read) {
-  NfcA::SDDFrame *fr = (NfcA::SDDFrame *)buffer;
+  NfcA::SDDFrame *fr = (NfcA::SDDFrame *)phy.getBuffer();
 
   // Serial.print(read);
 
@@ -100,7 +110,7 @@ void Emulator::readyState(uint8_t read) {
   if (fr->byteCount == 2 && fr->bitCount == 0) {
     // Poll device sent 16 bits (2b+0), expects 40 bits (5b+0) back
     // this is the basic SDD_REQ command to return the whole UID part
-    NfcA::PHY.transmit(nfcid_buf, 5);
+    phy.transmit(nfcid_buf, 5);
   } else if (fr->byteCount == 7 && fr->bitCount == 0) {
     // SEL_REQ command defined as having 0x70 as second byte (56 bits / 7b+0)
     // check if the id matches expected value
@@ -111,12 +121,12 @@ void Emulator::readyState(uint8_t read) {
         (col_idx == 1 && uidSize ==  7) ||
         (col_idx == 2 && uidSize == 10) 
       ) {
-        NfcA::PHY.transmit(SEL_RES_COMPLETE, 3);
+        phy.transmit(SEL_RES_COMPLETE, 3);
         // after being selected, now in ACTIVE state ready to handle type-2 tag commands
         state = ST_ACTIVE;
       } else {
         // still need to select next id part
-        NfcA::PHY.transmit(SEL_RES_INCOMPLETE, 3);
+        phy.transmit(SEL_RES_INCOMPLETE, 3);
       }
     }
   } else {
@@ -143,7 +153,7 @@ void Emulator::readyState(uint8_t read) {
     //   }
     // }
     
-    NfcA::PHY.transmit(nfcid_buf+uidBytes, 5-uidBytes, uidBits);
+    phy.transmit(nfcid_buf+uidBytes, 5-uidBytes, uidBits);
   }
 }
 
@@ -164,7 +174,7 @@ void Emulator::waitForReader() {
   state = ST_IDLE;
 
   do {
-    read = NfcA::PHY.receive();
+    read = phy.receive();
 
     if (read) {
       timeout = 0;

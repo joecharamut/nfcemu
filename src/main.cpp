@@ -1,5 +1,5 @@
 /***********************************************************************
-Copyright (C) 2022 Joseph Charamut
+Copyright (C) 2022-2023 Joseph Charamut
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -74,8 +74,8 @@ uint8_t tagUid[] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD};
 //Byte 14 (value=0x80=1024/8) specifies tag size in bytes divided by 8
 //Byte 18, 19 specify NDEF-Message size, Byte 20..35 is NDEF-header, content starts at Byte 36
 
-NfcEmu::Emulator emu;
 NfcA::Phy phy;
+NfcEmu::Emulator emu(phy);
 
 void phyReceiveData(uint8_t bytes) {
 

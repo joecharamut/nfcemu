@@ -26,9 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using namespace NfcA;
 
-Phy::Phy() {}
-
-void Phy::onReceive(rx_fnptr_t fn) {
+void Phy::onReceive(PhyReceiveFnPtr fn) {
   receiveCallback = fn;
 }
 
@@ -40,6 +38,13 @@ uint8_t Phy::bitsAvailable() {
   return bitPos;
 }
 
+uint8_t Phy::read() {
+  return buffer[readPtr++];
+}
+
+uint8_t *Phy::getBuffer() {
+  return buffer;
+}
 
 // general constants
 static constexpr uint32_t NFC_CARRIER = 13560000UL;

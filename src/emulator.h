@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #pragma once
 #include <avr/io.h>
+#include "impl/common.h"
 
 #define __packed __attribute__((packed))
 
@@ -34,14 +35,12 @@ typedef uint8_t emu_state_t;
 
 class Emulator {
 public:
+  Emulator(PhyInterface &phy) : phy(phy) {};
+
   void setup(uint8_t *storage, uint16_t storageSize);
   void waitForReader();
 
   void setUid(uint8_t *uid, uint8_t uidSize);
-
-  explicit Emulator();
-  Emulator(Emulator const &) = delete;
-  void operator=(Emulator) = delete;
 
   void receiveHandler(uint8_t read);
   // uint8_t receive();
@@ -49,14 +48,13 @@ public:
 
 private:
   emu_state_t state = ST_IDLE;
+  PhyInterface &phy;
 
   uint8_t *storage;
   uint16_t storageSize;
 
   uint8_t *uid;
   uint8_t uidSize;
-
-  uint8_t buffer[64];
 
   void idleState(uint8_t read);
   void sleepState(uint8_t read);
