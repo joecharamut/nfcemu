@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "usart.h"
 #include "emulator.h"
+#include "phy.h"
 
 uint8_t tagStorage[] = {
   // Block 0: UID/Internal
@@ -74,6 +75,11 @@ uint8_t tagUid[] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD};
 //Byte 18, 19 specify NDEF-Message size, Byte 20..35 is NDEF-header, content starts at Byte 36
 
 NfcEmu::Emulator emu;
+NfcA::Phy phy;
+
+void phyReceiveData(uint8_t bytes) {
+
+}
 
 int main() {
   // disable clock prescaler (use 20MHz clock)
@@ -83,6 +89,9 @@ int main() {
 
   Serial.begin();  
   Serial.print("Hello world\n");
+
+  phy.onReceive(phyReceiveData);
+  phy.begin();
 
   emu.setup(tagStorage, sizeof(tagStorage));
   emu.setUid(tagUid, sizeof(tagUid));

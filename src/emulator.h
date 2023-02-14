@@ -43,8 +43,9 @@ public:
   Emulator(Emulator const &) = delete;
   void operator=(Emulator) = delete;
 
-  uint8_t receive();
-  void transmit(const uint8_t *buf, uint8_t count, uint8_t skipBits = 0);
+  void receiveHandler(uint8_t read);
+  // uint8_t receive();
+  // void transmit(const uint8_t *buf, uint8_t count, uint8_t skipBits = 0);
 
 private:
   emu_state_t state = ST_IDLE;
