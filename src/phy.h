@@ -36,7 +36,7 @@ public:
 
   void onReceive(PhyReceiveFnPtr fn);
   uint8_t read();
-  uint8_t *getBuffer();
+  uint8_t *buffer();
 
   uint8_t available();
   uint8_t bitsAvailable();
@@ -48,7 +48,7 @@ private:
   uint8_t bitPos;
 
   uint8_t readPtr;
-  uint8_t buffer[NFC_PHY_BUF_SIZE];
+  uint8_t m_buffer[NFC_PHY_BUF_SIZE];
 
   
 

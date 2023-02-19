@@ -18,7 +18,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdint.h>
 #include <util/delay.h>
 #include <avr/interrupt.h>
+#include <avr/io.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "usart.h"
 #include "emulator.h"
@@ -69,7 +71,7 @@ uint8_t tagStorage[] = {
   'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd', '!',
 };
 
-uint8_t tagUid[] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD};
+uint8_t tagUid[10] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23};
             
 //Byte 14 (value=0x80=1024/8) specifies tag size in bytes divided by 8
 //Byte 18, 19 specify NDEF-Message size, Byte 20..35 is NDEF-header, content starts at Byte 36
@@ -90,11 +92,15 @@ int main() {
   Serial.begin();  
   Serial.print("Hello world\n");
 
+  // set uid to device serial num
+  // TODO: check if this works
+  // memcpy(tagUid, (void*)&SIGROW.SERNUM0, 10);
+
   phy.onReceive(phyReceiveData);
   phy.begin();
 
   emu.setup(tagStorage, sizeof(tagStorage));
-  emu.setUid(tagUid, sizeof(tagUid));
+  emu.setUid(tagUid, 7);
   Serial.print("tag setup\n");
 
   while (1) {

@@ -24,6 +24,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define force_inline inline __attribute__((always_inline))
 
+// Enable AC output on PA5 (pin 3)
+#define AC_DEBUG 1
+
+// Output manchester-encoded tx signal on PA1 (pin 11)
+#define MANCHESTER_DEBUG 1
+
 using namespace NfcA;
 
 void Phy::onReceive(PhyReceiveFnPtr fn) {
@@ -39,11 +45,11 @@ uint8_t Phy::bitsAvailable() {
 }
 
 uint8_t Phy::read() {
-  return buffer[readPtr++];
+  return m_buffer[readPtr++];
 }
 
-uint8_t *Phy::getBuffer() {
-  return buffer;
+uint8_t *Phy::buffer() {
+  return m_buffer;
 }
 
 // general constants
@@ -82,13 +88,12 @@ static void AC0_setup() {
   // set AC as event generator 0
   EVSYS.ASYNCCH0 = EVSYS_ASYNCCH0_AC0_OUT_gc;
 
-  #define AC_DEBUG
-  #ifdef AC_DEBUG
+#ifdef AC_DEBUG
   // set PA5 as OUTPUT
   PORTA.DIRSET = _BV(PIN5);
   // enable comparator output
   AC0.CTRLA |= AC_OUTEN_bm;
-  #endif
+#endif
 
   // enable AC
   AC0.CTRLA |= AC_ENABLE_bm | AC_HYSMODE1_bm;
@@ -143,8 +148,9 @@ void Phy::begin() {
   TCA0_setup();
   TCB0_setup();
 
-  // FIXME: for manchester debug output
+#ifdef MANCHESTER_DEBUG
   PORTA.DIRSET = _BV(PIN1);
+#endif
 }
 
 #define RX_EDGE_FLAG (TCB0.INTFLAGS & TCB_CAPT_bm)
@@ -194,7 +200,7 @@ uint8_t Phy::receive() {
   uint8_t bitPos = 0;
   uint8_t bytePos = 0;
   uint8_t lastBit = 0;
-  buffer[0] = 0;
+  m_buffer[0] = 0;
 
   // expecting odd parity bit, start at 1; (0 has an even # of ones)
   uint8_t parity = 1;
@@ -206,19 +212,19 @@ uint8_t Phy::receive() {
       /* TODO: check parity bit */                  \
       /*if ((b) != parity) {              \
         Serial.print("#P");             \
-        for (uint8_t i = 0; i <= bytePos; i++) Serial.printHex(buffer[i]); \
+        for (uint8_t i = 0; i <= bytePos; i++) Serial.printHex(m_buffer[i]); \
         return 0;                       \
       }*/                                \
       parity = 1;                       \
       bitPos = 0;                       \
       bytePos++;                        \
-      if (bytePos >= sizeof(buffer)) {  \
+      if (bytePos >= sizeof(m_buffer)) {  \
         return bytePos;                 \
       }                                 \
-      buffer[bytePos] = 0;              \
+      m_buffer[bytePos] = 0;              \
     } else {                            \
       parity ^= (b);                    \
-      buffer[bytePos] |= ((b)<<bitPos); \
+      m_buffer[bytePos] |= ((b)<<bitPos); \
       bitPos++;                         \
     }                                   \
   } while (0)
@@ -309,14 +315,16 @@ static inline void waitNBitPeriods(uint8_t n) {
 /// @brief Output waveform on PA4 for load modulation
 static force_inline void tx_high() {
   // reset waveform timer
+  // TODO: this doesnt really work
   TCA0.SPLIT.HCNT = 0;
   // enable output
   // PORTA.DIRSET = _BV(PIN4);
   VPORTA.DIR |= _BV(PIN4);
 
   // debug
+#ifdef MANCHESTER_DEBUG
   VPORTA.OUT |= _BV(PIN1);
-  // PORTA.OUTTGL = _BV(PIN2);
+#endif
 }
 
 /// @brief Stop outputting waveform on PA4 for load modulation
@@ -326,8 +334,9 @@ static force_inline void tx_low() {
   VPORTA.DIR &= ~_BV(PIN4);
 
   // debug
+#ifdef MANCHESTER_DEBUG
   VPORTA.OUT &= ~_BV(PIN1);
-  // PORTA.OUTTGL = _BV(PIN2);
+#endif
 }
 
 /// @brief Transmit a one bit (high->low after 1/2bd)

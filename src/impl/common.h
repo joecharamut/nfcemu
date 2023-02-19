@@ -30,6 +30,6 @@ public:
 
   /// @brief Get a pointer to the received data buffer
   /// @return pointer to the received data buffer
-  virtual uint8_t *getBuffer() = 0;
+  virtual uint8_t *buffer() = 0;
 };
 

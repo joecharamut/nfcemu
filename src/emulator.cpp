@@ -81,12 +81,12 @@ void Emulator::sleepState(uint8_t read) {
 }
 
 void Emulator::readyState(uint8_t read) {
-  NfcA::SDDFrame *fr = (NfcA::SDDFrame *)phy.getBuffer();
+  NfcA::SDDFrame *fr = (NfcA::SDDFrame *)phy.buffer();
 
   // Serial.print(read);
 
   // TODO: not really correct
-  if (read == 4 && buffer[0] == 0x50 && buffer[1] == 0x00) {
+  if (read == 4 && phy.buffer()[0] == 0x50 && phy.buffer()[1] == 0x00) {
     state = ST_SLEEP;
     // Serial.print("Z");
     return;
@@ -96,14 +96,14 @@ void Emulator::readyState(uint8_t read) {
   if (fr->command != NfcA::SDDCommand::SDD_REQ) {
     state = ST_IDLE;
     Serial.print("#");
-    for (uint8_t i = 0; i < read; i++) Serial.printHex(buffer[i]);
+    for (uint8_t i = 0; i < read; i++) Serial.printHex(phy.buffer()[i]);
     return;
   }
 
   // get which collision level the command wants
   uint8_t col_idx = fr->collisionLevel / 2 - 1;
   // SDD_REQ is at most 7 bytes, use space after as work area
-  uint8_t *nfcid_buf = buffer+8;
+  uint8_t nfcid_buf[5];
   // calculate sdd compare bytes
   NfcA::genSddResponse(uid, uidSize, col_idx, nfcid_buf);
 
