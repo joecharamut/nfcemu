@@ -15,7 +15,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ***********************************************************************/
 
-#include "phy.h"
+#include "nfcA.h"
 
 #include <string.h>
 #include <avr/io.h>
@@ -31,10 +31,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define MANCHESTER_DEBUG 1
 
 using namespace NfcA;
-
-void Phy::onReceive(PhyReceiveFnPtr fn) {
-  receiveCallback = fn;
-}
 
 uint8_t Phy::available() {
   return bytePos;
@@ -233,6 +229,10 @@ uint8_t Phy::receive() {
     if (RX_EDGE_FLAG) {
       delta = RX_EDGE_TIME & BITPERIOD_MSK;
 
+      uint8_t delta_1_0 = (delta <= N_BITPERIODS(1.0));
+      uint8_t delta_1_5 = (delta <= N_BITPERIODS(1.5));
+      uint8_t delta_2_0 = (delta <= N_BITPERIODS(2.0));
+
       if (lastBit == 0) {
         // space->???
         if (delta <= N_BITPERIODS(1.0)) {
@@ -243,7 +243,7 @@ uint8_t Phy::receive() {
           BIT(1);
           lastBit = 1;
         } else {
-          // delta > 2.0 = space, idle (end of message)
+          // delta > 2.0 = idle (end of message)
           // BIT(0);
           break;
         }

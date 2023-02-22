@@ -1,5 +1,5 @@
 /***********************************************************************
-Copyright (C) 2022 Joseph Charamut
+Copyright (C) 2022-2023 Joseph Charamut
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -67,4 +67,4 @@ struct __packed SDDFrame {
 };
 static_assert(sizeof(SDDFrame) == 2);
 
-};
+}

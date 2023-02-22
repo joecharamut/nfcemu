@@ -1,5 +1,5 @@
 /***********************************************************************
-Copyright (C) 2022 Joseph Charamut
+Copyright (C) 2022-2023 Joseph Charamut
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -17,7 +17,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #pragma once
 #include <avr/io.h>
-#include "impl/common.h"
+#include <noncopyable.hpp>
+#include "phy/interface.h"
 
 #define __packed __attribute__((packed))
 
@@ -33,18 +34,12 @@ enum ST_ENUM {
 };
 typedef uint8_t emu_state_t;
 
-class Emulator {
+class Emulator : private NonCopyable {
 public:
   Emulator(PhyInterface &phy) : phy(phy) {};
-
   void setup(uint8_t *storage, uint16_t storageSize);
-  void waitForReader();
-
   void setUid(uint8_t *uid, uint8_t uidSize);
-
-  void receiveHandler(uint8_t read);
-  // uint8_t receive();
-  // void transmit(const uint8_t *buf, uint8_t count, uint8_t skipBits = 0);
+  void waitForReader();
 
 private:
   emu_state_t state = ST_IDLE;
@@ -62,4 +57,4 @@ private:
   void activeState(uint8_t read);
 };
 
-};
+}

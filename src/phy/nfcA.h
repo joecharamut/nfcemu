@@ -18,7 +18,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #pragma once
 
 #include <stdint.h>
-#include "impl/common.h"
+#include <noncopyable.hpp>
+#include "interface.h"
 
 #ifndef NFC_PHY_BUF_SIZE
 #define NFC_PHY_BUF_SIZE 64
@@ -27,23 +28,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 namespace NfcA {
 
 /// @brief Physical layer implementation for data transmission
-class Phy : public PhyInterface {
+class Phy : public PhyInterface, private NonCopyable {
 public:
-  void begin();
+  void begin() override;
 
-  void transmit(const uint8_t *buf, uint8_t count, uint8_t skipBits = 0);
-  uint8_t receive();
+  void transmit(const uint8_t *buf, uint8_t count, uint8_t skipBits) override;
+  uint8_t receive() override;
 
-  void onReceive(PhyReceiveFnPtr fn);
-  uint8_t read();
-  uint8_t *buffer();
+  uint8_t read() override;
+  uint8_t *buffer() override;
 
   uint8_t available();
   uint8_t bitsAvailable();
 
 private:
-  PhyReceiveFnPtr receiveCallback;
-
   uint8_t bytePos;
   uint8_t bitPos;
 

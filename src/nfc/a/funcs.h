@@ -33,4 +33,4 @@ namespace NfcA {
   /// @param outputBuf generated response output (must be 5 bytes)
   /// @return 0 on success, -1 for invalid parameter
   int8_t genSddResponse(const uint8_t *uid, uint8_t uidSize, uint8_t collisionLevel, uint8_t *outputBuf);
-};
+}

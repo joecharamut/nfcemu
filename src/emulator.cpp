@@ -20,7 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "nfc/a/funcs.h"
 #include "nfc/a/types.h"
 #include "nfc/crc.h"
-#include "phy.h"
 
 #include <util/delay.h>
 #include <string.h>
@@ -160,8 +159,6 @@ void Emulator::readyState(uint8_t read) {
 void Emulator::activeState(uint8_t read) {
 
 }
-
-void Emulator::receiveHandler(uint8_t read) {}
 
 void Emulator::setup(uint8_t *storage, uint16_t storageSize) {
   this->storage = storage;

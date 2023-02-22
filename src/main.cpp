@@ -22,9 +22,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <stdlib.h>
 #include <string.h>
 
+#define __ASSERT_USE_STDERR 1
+#include <assert.h>
+
 #include "usart.h"
 #include "emulator.h"
-#include "phy.h"
+#include "phy/nfcA.h"
 
 uint8_t tagStorage[] = {
   // Block 0: UID/Internal
@@ -79,14 +82,29 @@ uint8_t tagUid[10] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23
 NfcA::Phy phy;
 NfcEmu::Emulator emu(phy);
 
-void phyReceiveData(uint8_t bytes) {
+extern "C" void abort() {
+  cli();
+  Serial.print("Aborted");
+  while (1);
+}
 
+extern "C" void __assert(const char *func, const char *file, int line, const char *expr) {
+  Serial.print("Assertion failed: (");
+  Serial.print(expr);
+  Serial.print(")");
+  if (func != NULL) {
+    Serial.print(", function "); Serial.print(func);
+  }
+  Serial.print(", file "); Serial.print(file);
+  Serial.print(", line "); Serial.print(line);
+  Serial.print(".\n");
+  abort();
 }
 
 int main() {
   // disable clock prescaler (use 20MHz clock)
   _PROTECTED_WRITE(CLKCTRL.MCLKCTRLB, 0x00);
-  // set use extclk
+  // set use external clock
   // _PROTECTED_WRITE(CLKCTRL.MCLKCTRLA, CLKCTRL_CLKSEL_EXTCLK_gc);
 
   Serial.begin();  
@@ -96,7 +114,6 @@ int main() {
   // TODO: check if this works
   // memcpy(tagUid, (void*)&SIGROW.SERNUM0, 10);
 
-  phy.onReceive(phyReceiveData);
   phy.begin();
 
   emu.setup(tagStorage, sizeof(tagStorage));

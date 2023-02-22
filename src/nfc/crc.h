@@ -37,4 +37,4 @@ uint16_t calcCrc16A(uint8_t *buf, uint8_t len);
 /// @param buf data buffer
 /// @param len length of data
 void appendCrc16A(uint8_t *buf, uint8_t len);
-};
+}
