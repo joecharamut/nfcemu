@@ -870,7 +870,7 @@
     (uuid 8b4fc8aa-052a-4b8b-ae4d-9db4c26f48cd)
     (property "Reference" "D1" (id 0) (at 123.19 35.56 0))
     (property "Value" "D_Schottky" (id 1) (at 123.19 38.1 0))
-    (property "Footprint" "Package_TO_SOT_SMD:SOT-23-3" (id 2) (at 123.19 40.64 0)
+    (property "Footprint" "Diode_SMD:D_SOD-123" (id 2) (at 123.19 40.64 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Datasheet" "~" (id 3) (at 123.19 40.64 0)
