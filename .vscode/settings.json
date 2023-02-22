@@ -1,10 +1,18 @@
 {
-    "files.associations": {
-        "logging.h": "c",
-        "pgmspace.h": "c"
-    },
     "editor.tabSize": 2,
     "cSpell.words": [
-        "BITPERIODS"
+        "BITPERIODS",
+        "prescaler"
+    ],
+    "cSpell.language": "en",
+    "cSpell.ignorePaths": [
+        "package-lock.json",
+        "node_modules",
+        "vscode-extension",
+        ".git/objects",
+        ".vscode",
+        ".vscode-insiders",
+        ".pio",
+        "**/.platformio",
     ]
 }
