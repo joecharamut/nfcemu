@@ -116,7 +116,7 @@ int main() {
 
   phy.begin();
 
-  emu.setup(tagStorage, sizeof(tagStorage));
+  emu.setStorage(tagStorage, sizeof(tagStorage));
   emu.setUid(tagUid, 7);
   Serial.print("tag setup\n");
 

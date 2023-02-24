@@ -36,20 +36,24 @@ typedef uint8_t emu_state_t;
 
 class Emulator : private NonCopyable {
 public:
-  Emulator(PhyInterface &phy) : phy(phy) {};
-  void setup(uint8_t *storage, uint16_t storageSize);
-  void setUid(uint8_t *uid, uint8_t uidSize);
+  Emulator(PhyInterface& phy) : phy(phy) {};
+  void setUid(uint8_t *uid, uint8_t size);
+  void setStorage(uint8_t *storage, uint16_t size);
   void waitForReader();
 
 private:
-  emu_state_t state = ST_IDLE;
-  PhyInterface &phy;
+  PhyInterface& phy;
 
-  uint8_t *storage;
-  uint16_t storageSize;
+  emu_state_t m_state = ST_IDLE;
 
-  uint8_t *uid;
-  uint8_t uidSize;
+  uint8_t *m_storage;
+  uint16_t m_storageSize;
+
+  uint8_t *m_uid;
+  uint8_t m_uidSize;
+
+  void tx(const uint8_t *data, uint8_t size, uint8_t skip = 0);
+  uint8_t rx();
 
   void idleState(uint8_t read);
   void sleepState(uint8_t read);
