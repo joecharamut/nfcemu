@@ -201,29 +201,30 @@ uint8_t Phy::receive() {
   // expecting odd parity bit, start at 1; (0 has an even # of ones)
   uint8_t parity = 1;
 
-  // macro to handle checking whether it's the next byte, 
+  // helper to handle checking whether it's the next byte, 
   //  skipping the parity bit, and writing in the data
-  #define BIT(b) do {                   \
-    if (bitPos == 8) {                  \
-      /* TODO: check parity bit */                  \
-      /*if ((b) != parity) {              \
-        Serial.print("#P");             \
-        for (uint8_t i = 0; i <= bytePos; i++) Serial.printHex(m_buffer[i]); \
-        return 0;                       \
-      }*/                                \
-      parity = 1;                       \
-      bitPos = 0;                       \
-      bytePos++;                        \
-      if (bytePos >= sizeof(m_buffer)) {  \
-        return bytePos;                 \
-      }                                 \
-      m_buffer[bytePos] = 0;              \
-    } else {                            \
-      parity ^= (b);                    \
-      m_buffer[bytePos] |= ((b)<<bitPos); \
-      bitPos++;                         \
-    }                                   \
-  } while (0)
+  auto BIT = [&] (uint8_t b) -> void {
+    if (bitPos == 8) {
+      // FIXME: check parity bit
+      // if (b != parity) {
+      //   Serial.print("#P");
+      //   for (uint8_t i = 0; i <= bytePos; i++) Serial.printHex(m_buffer[i]);
+      //   return 0;
+      // }
+      parity = 1;
+      bitPos = 0;
+      bytePos++;
+      if (bytePos >= sizeof(m_buffer)) {
+        // FIXME: deal with buffer overflow better
+        bytePos = 0;
+      }
+      m_buffer[bytePos] = 0;
+    } else {
+      parity ^= b;
+      m_buffer[bytePos] |= (b<<bitPos);
+      bitPos++;
+    }
+  };
 
   do {
     if (RX_EDGE_FLAG) {
