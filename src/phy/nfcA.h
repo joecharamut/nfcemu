@@ -42,8 +42,8 @@ public:
   uint8_t bitsAvailable();
 
 private:
-  uint8_t bytePos;
-  uint8_t bitPos;
+  // uint8_t bytePos;
+  // uint8_t bitPos;
 
   uint8_t readPtr;
   uint8_t m_buffer[NFC_PHY_BUF_SIZE];

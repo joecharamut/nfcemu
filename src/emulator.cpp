@@ -183,7 +183,7 @@ void Emulator::waitForReader() {
 
     if (read) {
       timeout = 0;
-      // Serial.hexdump(buffer, read);
+      Serial.hexdump(phy.buffer(), read);
 
       switch (m_state) {
         case ST_IDLE: idleState(read); break;
@@ -191,10 +191,7 @@ void Emulator::waitForReader() {
         case ST_READY: readyState(read); break;
         case ST_ACTIVE: activeState(read); break;
         default: {
-          Serial.print("m_state is an invalid value: ");
-          Serial.print(m_state);
-          cli();
-          while (1);
+          m_state = ST_IDLE;
         }; break;
       }
 

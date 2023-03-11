@@ -22,6 +22,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <avr/interrupt.h>
 #include <util/delay_basic.h>
 
+#include "timer.hpp"
+#include "../usart.h"
+
 #define force_inline inline __attribute__((always_inline))
 
 // Enable AC output on PA5 (pin 3)
@@ -33,11 +36,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 using namespace NfcA;
 
 uint8_t Phy::available() {
-  return bytePos;
+  return 0;
 }
 
 uint8_t Phy::bitsAvailable() {
-  return bitPos;
+  return 0;
 }
 
 uint8_t Phy::read() {
@@ -72,6 +75,8 @@ static constexpr uint16_t N_BITPERIODS(float n) {
  * Setup analog comparator and connect it to the event system
 */
 static void AC0_setup() {
+  // reset any prev config
+  AC0.CTRLA = 0;
   // set AINN0 and AINP0 as INPUT
   PORTA.DIRCLR = _BV(PIN6) | _BV(PIN7);
   // disable digital input buffer
@@ -81,9 +86,6 @@ static void AC0_setup() {
   // PORTA.PIN6CTRL |= PORT_PULLUPEN_bm;
   // PORTA.PIN7CTRL |= PORT_PULLUPEN_bm;
 
-  // set AC as event generator 0
-  EVSYS.ASYNCCH0 = EVSYS_ASYNCCH0_AC0_OUT_gc;
-
 #ifdef AC_DEBUG
   // set PA5 as OUTPUT
   PORTA.DIRSET = _BV(PIN5);
@@ -91,8 +93,8 @@ static void AC0_setup() {
   AC0.CTRLA |= AC_OUTEN_bm;
 #endif
 
-  // enable AC
-  AC0.CTRLA |= AC_ENABLE_bm | AC_HYSMODE1_bm;
+  // enable AC (negative edge trigger, hysteresis mode 1)
+  AC0.CTRLA |= AC_INTMODE_NEGEDGE_gc | AC_ENABLE_bm;
 }
 
 /**
@@ -113,6 +115,9 @@ static void TCA0_setup() {
   // set 50% duty cycle
   TCA0.SPLIT.HCMP1 = (SUBCARRIER_PER/2);
 
+  // these somehow got enabled?
+  TCA0.SPLIT.INTCTRL = 0;
+
   // setup TCA0 low as a timeout counter 
   TCA0.SPLIT.LPER = BITTIMEOUT_PER;
 
@@ -122,35 +127,17 @@ static void TCA0_setup() {
   // PORTA.DIRSET = _BV(PIN4);
 }
 
-/**
- * Setup TCB0 to capture when the comparator detects a falling edge (for modified miller decoding)
-*/
-static void TCB0_setup() {
-  // set TCB0 event source to async event ch 0
-  EVSYS.ASYNCUSER0 = EVSYS_ASYNCUSER0_ASYNCCH0_gc;
-
-  // enable input capture event on negative edge
-  TCB0.EVCTRL = TCB_EDGE_bm | TCB_CAPTEI_bm;
-
-  // input capture frequency measurement mode
-  TCB0.CTRLB = TCB_CNTMODE_FRQ_gc;
-
-  // set divider to CLK/1 and enable
-  TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc | TCB_ENABLE_bm;
-}
-
 void Phy::begin() {
   AC0_setup();
   TCA0_setup();
-  TCB0_setup();
+  
+  TimerA::setup();
+  TimerB::setup();
 
 #ifdef MANCHESTER_DEBUG
   PORTA.DIRSET = _BV(PIN1);
 #endif
 }
-
-#define RX_EDGE_FLAG (TCB0.INTFLAGS & TCB_CAPT_bm)
-#define RX_EDGE_TIME (TCB0.CCMP)
 
 #define BIT_TIMEOUT_FLAG (TCA0.SPLIT.INTFLAGS & TCA_SPLIT_LUNF_bm)
 
@@ -177,22 +164,20 @@ static inline void resetBitTimeout() {
 /// @ref Protocol info referenced from https://github.com/sigrokproject/libsigrokdecode/blob/master/decoders/miller/pd.py
 /// @return number of bytes successfully received
 uint8_t Phy::receive() {
-  TCA0.SPLIT.LPER = HALFBIT_PER;
+  // clear comparator flag
+  AC0.STATUS |= AC_CMP_bm;
 
-  uint8_t timeouts = 0;
-  resetBitTimeout();
+  TimerB::setTop(N_BITPERIODS(2.0));
+  TimerB::clear();
 
   // wait for falling edge / start of frame
-  while (!RX_EDGE_FLAG) {
-    if (BIT_TIMEOUT_FLAG) {
-      TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
-      // if timeout return no data
-      if (timeouts > 8) return 0;
-      timeouts++;
-    }
+  while (!(AC0.STATUS & AC_CMP_bm)) {
+    if (TimerB::interrupted()) return 0;
   }
 
-  uint16_t delta = RX_EDGE_TIME;
+  AC0.STATUS |= AC_CMP_bm;
+
+  uint16_t delta = 0;
   uint8_t bitPos = 0;
   uint8_t bytePos = 0;
   uint8_t lastBit = 0;
@@ -214,10 +199,11 @@ uint8_t Phy::receive() {
       parity = 1;
       bitPos = 0;
       bytePos++;
-      if (bytePos >= sizeof(m_buffer)) {
-        // FIXME: deal with buffer overflow better
-        bytePos = 0;
-      }
+      // if (bytePos >= sizeof(m_buffer)) {
+      //   // FIXME: deal with buffer overflow better
+      //   bytePos = 0;
+      //   Serial.print("buffer overflow");
+      // }
       m_buffer[bytePos] = 0;
     } else {
       parity ^= b;
@@ -226,57 +212,59 @@ uint8_t Phy::receive() {
     }
   };
 
-  do {
-    if (RX_EDGE_FLAG) {
-      delta = RX_EDGE_TIME & BITPERIOD_MSK;
+  while (!TimerB::interrupted()) {
+    if (!(AC0.STATUS & AC_CMP_bm)) continue;
 
-      uint8_t delta_1_0 = (delta <= N_BITPERIODS(1.0));
-      uint8_t delta_1_5 = (delta <= N_BITPERIODS(1.5));
-      uint8_t delta_2_0 = (delta <= N_BITPERIODS(2.0));
+    // get delta
+    delta = TimerB::count();
 
-      if (lastBit == 0) {
-        // space->???
-        if (delta <= N_BITPERIODS(1.0)) {
-          // 1.0 time between bits = space
-          BIT(0);
-        } else if (delta <= N_BITPERIODS(1.5)) {
-          // 1.5 time = mark
-          BIT(1);
-          lastBit = 1;
-        } else {
-          // delta > 2.0 = idle (end of message)
-          // BIT(0);
-          break;
-        }
+    // reset delta and comparator flag
+    TimerB::clear();
+    AC0.STATUS |= AC_CMP_bm;
+
+    if (lastBit == 0) {
+      // space->???
+      if (delta <= N_BITPERIODS(1.0)) {
+        // 1.0 time between bits = space
+        BIT(0);
+      } else if (delta <= N_BITPERIODS(1.5)) {
+        // 1.5 time = mark
+        BIT(1);
+        lastBit = 1;
       } else {
-        // mark->???
-        if (delta <= N_BITPERIODS(1.0)) {
-          // 1.0 time = mark
-          BIT(1);
-        } else if (delta <= N_BITPERIODS(1.5)) {
-          // 1.5 time = 2 spaces
-          BIT(0);
-          BIT(0);
-          lastBit = 0;
-        } else if (delta <= N_BITPERIODS(2.0)) {
-          // 2.0 time = space, mark
-          BIT(0);
-          BIT(1);
-        } else {
-          // delta > 2.0  == space, idle (end of message)
-          // BIT(0);
-          break;
-        }
+        // delta > 2.0 = idle (end of message)
+        // BIT(0);
+        break;
       }
-
-      timeouts = 8;
+    } else {
+      // mark->???
+      if (delta <= N_BITPERIODS(1.0)) {
+        // 1.0 time = mark
+        BIT(1);
+      } else if (delta <= N_BITPERIODS(1.5)) {
+        // 1.5 time = 2 spaces
+        BIT(0);
+        BIT(0);
+        lastBit = 0;
+      } else if (delta <= N_BITPERIODS(2.0)) {
+        // 2.0 time = space, mark
+        BIT(0);
+        BIT(1);
+      } else {
+        // delta > 2.0  == idle (end of message)
+        // BIT(0);
+        break;
+      }
     }
 
-    if (BIT_TIMEOUT_FLAG) {
-      timeouts--;
-      TCA0.SPLIT.INTFLAGS |= TCA_SPLIT_LUNF_bm;
+    if (bytePos >= sizeof(m_buffer)) {
+      Serial.print("buffer overflow");
+      return 0;
     }
-  } while (timeouts);
+  }
+
+  // FIXME: set correct waiting time until tx
+  TimerB::setTop(N_BITPERIODS(4.0));
   
   /**
    * A short frame is used to initiate communication and consists of the following:
@@ -291,8 +279,6 @@ uint8_t Phy::receive() {
   if (bitPos >= 4) {
     bytePos++;
   }
-
-  TCA0.SPLIT.LPER = BITTIMEOUT_PER;
 
   return bytePos;
 }

@@ -82,23 +82,27 @@ uint8_t tagUid[10] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23
 NfcA::Phy phy;
 NfcEmu::Emulator emu(phy);
 
-extern "C" void abort() {
-  cli();
-  Serial.print("Aborted");
-  while (1);
-}
+// extern "C" void abort() {
+//   cli();
+//   Serial.print("Aborted");
+//   while (1);
+// }
 
-extern "C" void __assert(const char *func, const char *file, int line, const char *expr) {
-  Serial.print("Assertion failed: (");
-  Serial.print(expr);
-  Serial.print(")");
-  if (func != NULL) {
-    Serial.print(", function "); Serial.print(func);
-  }
-  Serial.print(", file "); Serial.print(file);
-  Serial.print(", line "); Serial.print(line);
-  Serial.print(".\n");
-  abort();
+// extern "C" void __assert(const char *func, const char *file, int line, const char *expr) {
+//   Serial.print("Assertion failed: (");
+//   Serial.print(expr);
+//   Serial.print(")");
+//   if (func != NULL) {
+//     Serial.print(", function "); Serial.print(func);
+//   }
+//   Serial.print(", file "); Serial.print(file);
+//   Serial.print(", line "); Serial.print(line);
+//   Serial.print(".\n");
+//   abort();
+// }
+
+ISR(BADISR_vect) {
+  for (;;) USART0.TXDATAL = '!';
 }
 
 int main() {
@@ -107,8 +111,41 @@ int main() {
   // set use external clock
   // _PROTECTED_WRITE(CLKCTRL.MCLKCTRLA, CLKCTRL_CLKSEL_EXTCLK_gc);
 
-  Serial.begin();  
+  Serial.begin();
   Serial.print("Hello world\n");
+
+  if (RSTCTRL.RSTFR & RSTCTRL_UPDIRF_bm) {
+    Serial.print("UPDI Reset\n");
+    RSTCTRL.RSTFR |= RSTCTRL_UPDIRF_bm;
+  }
+  if (RSTCTRL.RSTFR & RSTCTRL_SWRF_bm) {
+    Serial.print("Software Reset\n");
+    RSTCTRL.RSTFR |= RSTCTRL_SWRF_bm;
+  }
+  if (RSTCTRL.RSTFR & RSTCTRL_WDRF_bm) {
+    Serial.print("WDT Reset\n");
+    RSTCTRL.RSTFR |= RSTCTRL_WDRF_bm;
+  }
+  if (RSTCTRL.RSTFR & RSTCTRL_EXTRF_bm) {
+    Serial.print("External Reset\n");
+    RSTCTRL.RSTFR |= RSTCTRL_EXTRF_bm;
+  }
+  if (RSTCTRL.RSTFR & RSTCTRL_BORF_bm) {
+    Serial.print("BOD Reset\n");
+    RSTCTRL.RSTFR |= RSTCTRL_BORF_bm;
+  }
+  if (RSTCTRL.RSTFR & RSTCTRL_PORF_bm) {
+    Serial.print("POR Reset\n");
+    RSTCTRL.RSTFR |= RSTCTRL_PORF_bm;
+  }
+  
+  if (RSTCTRL.RSTFR) {
+    Serial.print("Unknown Reset (RSTFR != 0)\n");
+    Serial.putchar(RSTCTRL.RSTFR);
+    
+    _PROTECTED_WRITE(RSTCTRL.SWRR, RSTCTRL_SWRE_bm);
+    while (1);
+  }
 
   // set uid to device serial num
   // TODO: check if this works
