@@ -101,6 +101,10 @@ NfcEmu::Emulator emu(phy);
 //   abort();
 // }
 
+extern "C" void __cxa_pure_virtual() {
+  while (1);
+}
+
 ISR(BADISR_vect) {
   for (;;) USART0.TXDATAL = '!';
 }
